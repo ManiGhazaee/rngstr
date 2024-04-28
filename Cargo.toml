@@ -2,6 +2,12 @@
 name = "rngstr"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/ManiGhazaee/rngstr"
+authors = ["ManiGhazaee <hosseinghazaee1@gmail.com>"]
+description = "A cli tool that generates random strings of characters with options to customize the character set or length of the generated string"
+readme = "README.md"
+license = "MIT"
+keywords = ["cli", "random", "rng", "string"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

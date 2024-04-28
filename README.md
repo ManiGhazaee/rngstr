@@ -16,6 +16,8 @@ rngstr [OPTIONS]
 
 - Default character set = (A-Z, a-z, 0-9)
 - Default length = 32
+- Default copy to clipboard = true
+- Default print = true
 
 ## Options
 - `-l, --length <LENGTH>`:

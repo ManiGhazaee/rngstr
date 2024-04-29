@@ -1,6 +1,6 @@
 [package]
 name = "rngstr"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 repository = "https://github.com/ManiGhazaee/rngstr"
 authors = ["ManiGhazaee <hosseinghazaee1@gmail.com>"]

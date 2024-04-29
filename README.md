@@ -14,32 +14,45 @@ cargo install rngstr
 rngstr [OPTIONS]
 ```
 
-- Default character set = (A-Z, a-z, 0-9)
-- Default length = 32
-- Default copy to clipboard = true
-- Default print = true
+### Defaults:
+
+- character set = (A-Z, a-z, 0-9)
+- length = 32
+- copy to clipboard = true
+- print = true
+- suffix = ""
+- prefix = ""
+- repeat = 1
 
 ## Options
 - `-l, --length <LENGTH>`:
-    [default: 32]
-
-- `-p, --password`:
-    Use the password character set (A-Z, a-z, 0-9, and special characters)
-
-- `-u, --url`:
-    Use the URL character set (A-Z, a-z, 0-9, and -_.~)
 
 - `-c, --custom <CUSTOM>`:
-    Specify a string of custom characters (e.g. abcd0123)
+          Specify a string of custom characters (e.g. `abc01111`)
+
+- `--regex <REGEX>`:
+          Specify a regular expression pattern to be used to generate the character set (e.g. `[0-9A-F]` will generate `0123456789ABCDEF` character set)
+
+- `-p, --prefix <PREFIX>`:
+          Specify a string to be prepended to the generated string
+
+- `-s, --suffix <SUFFIX>`:
+          Specify a string to be appended to the generated string
+
+- `-r, --repeat <REPEAT>`:
+          Specify number of times string should be generated
 
 - `--no-copy`:
-    Don't copy the generated result to clipboard
+          Don't copy the generated result to clipboard
 
 - `--no-print`:
-    Don't print the generated result
+          Don't print the generated result
+
+- `--password`:
+          Use the password character set (A-Z, a-z, 0-9, and special characters)
 
 - `-h, --help`:
-    Print help (see a summary with '-h')
+          Print help (see a summary with '-h')
 
 - `-V, --version`:
-    Print version
+          Print version

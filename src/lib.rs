@@ -4,12 +4,12 @@ use std::{
     iter::{Enumerate, Peekable},
     ops::Range,
     str::Chars,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
 };
 
 use clap::Parser;
 use cli_clipboard::set_contents;
-use rand::{thread_rng, Rng};
+use rand::{rngs::ThreadRng, thread_rng, Rng};
 use rayon::prelude::*;
 use regex::Regex;
 
@@ -192,13 +192,12 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
                 command_call_found = true;
                 continue;
             }
-            '\\' => match chars.peek() {
-                Some((_, '!')) => {
+            '\\' => {
+                if let Some((_, '!')) = chars.peek() {
                     string_token.push(chars.next().unwrap().1);
                     continue;
                 }
-                _ => (),
-            },
+            }
             _ => (),
         }
         string_token.push(ch);
@@ -241,13 +240,12 @@ fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
                 string_token.clear();
                 continue;
             }
-            '\\' => match chars.peek() {
-                Some((_, '!' | '$')) => {
+            '\\' => {
+                if let Some((_, '$' | '!')) = chars.peek() {
                     string_token.push(chars.next().unwrap().1);
                     continue;
                 }
-                _ => (),
-            },
+            }
             _ => (),
         };
         if paren == 0 {
@@ -331,10 +329,9 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
     (0..command.cli.repeat)
         .into_par_iter()
         .map(|i| {
-            let gen: Arc<RwLock<Option<String>>> = Arc::new(RwLock::new(None));
-
+            let gen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
             let temp = tokens
-                .par_iter()
+                .into_par_iter()
                 .map(|token| match token {
                     Token::Command { name, tokens } => parse(
                         commands,
@@ -345,8 +342,9 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                     ),
                     Token::String(string) => string.to_string(),
                     Token::Target => {
-                        if let Some(gen) = &*gen.read().unwrap() {
-                            return gen.to_string();
+                        let mut lock = gen.lock().unwrap();
+                        if let Some(gen) = &*lock {
+                            gen.to_string()
                         } else {
                             let str = rngstr(&Cli {
                                 repeat: 1,
@@ -354,16 +352,19 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                                 suffix: String::new(),
                                 ..command.cli.clone()
                             });
-                            *gen.write().unwrap() = Some(str.clone());
-                            return str.to_string();
+                            *lock = Some(str.clone());
+                            str
                         }
                     }
                 })
                 .collect::<String>();
+
             if (i == command.cli.repeat - 1) && command.cli.no_trailing_suffix {
-                format(&command.cli.prefix, &temp, "")
+                let ret = format(&command.cli.prefix, &temp, "");
+                ret
             } else {
-                format(&command.cli.prefix, &temp, &command.cli.suffix)
+                let ret = format(&command.cli.prefix, &temp, &command.cli.suffix);
+                ret
             }
         })
         .collect::<String>()
@@ -377,8 +378,7 @@ const SET: [char; 94] = [
     ')', '+', '=', '{', '[', '}', ']', '|', '\\', ':', ';', '"', '\'', '<', ',', '>', '?', '/',
 ];
 
-fn gen(len: usize, set: &[char]) -> String {
-    let mut rng = thread_rng();
+fn gen(rng: &mut ThreadRng, len: usize, set: &[char]) -> String {
     let mut res = String::with_capacity(len);
     for _ in 0..len {
         res.push(set[rng.gen_range(0..set.len())]);
@@ -386,8 +386,7 @@ fn gen(len: usize, set: &[char]) -> String {
     res
 }
 
-fn gen_custom(len: usize, set: &str) -> String {
-    let mut rng = thread_rng();
+fn gen_custom(rng: &mut ThreadRng, len: usize, set: &str) -> String {
     let mut res = String::with_capacity(len);
     let set_chars: Vec<char> = set.chars().collect();
 
@@ -427,9 +426,16 @@ fn parse_range(str: &str) -> Range<usize> {
 }
 
 pub fn rngstr(cli: &Cli) -> String {
+    let mut rng = thread_rng();
     match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
         (Some(set), ..) => (0..cli.repeat)
-            .map(|_| format(&cli.prefix, &gen_custom(cli.length, &set), &cli.suffix))
+            .map(|_| {
+                format(
+                    &cli.prefix,
+                    &gen_custom(&mut rng, cli.length, &set),
+                    &cli.suffix,
+                )
+            })
             .collect::<String>(),
         (_, Some(string), ..) => {
             let re = Regex::new(&string).unwrap();
@@ -444,12 +450,17 @@ pub fn rngstr(cli: &Cli) -> String {
             };
 
             (0..cli.repeat)
-                .map(|_| format(&cli.prefix, &gen_custom(cli.length, &set), &cli.suffix))
+                .map(|_| {
+                    format(
+                        &cli.prefix,
+                        &gen_custom(&mut rng, cli.length, &set),
+                        &cli.suffix,
+                    )
+                })
                 .collect::<String>()
         }
         (.., Some(range), _) => {
             let range = parse_range(range);
-            let mut rng = thread_rng();
             (0..cli.repeat)
                 .map(|_| {
                     format(
@@ -461,58 +472,197 @@ pub fn rngstr(cli: &Cli) -> String {
                 .collect::<String>()
         }
         (.., true) => (0..cli.repeat)
-            .map(|_| format(&cli.prefix, &gen(cli.length, &SET), &cli.suffix))
+            .map(|_| format(&cli.prefix, &gen(&mut rng, cli.length, &SET), &cli.suffix))
             .collect::<String>(),
         _ => (0..cli.repeat)
-            .map(|_| format(&cli.prefix, &gen(cli.length, &SET[0..62]), &cli.suffix))
+            .map(|_| {
+                format(
+                    &cli.prefix,
+                    &gen(&mut rng, cli.length, &SET[0..62]),
+                    &cli.suffix,
+                )
+            })
             .collect::<String>(),
     }
 }
 
+// clean code:
 pub fn par_rngstr(cli: &Cli) -> String {
-    match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
-        (Some(set), ..) => (0..cli.repeat)
-            .into_par_iter()
-            .map(|_| format(&cli.prefix, &gen_custom(cli.length, &set), &cli.suffix))
-            .collect::<String>(),
-        (_, Some(string), ..) => {
-            let re = Regex::new(&string).unwrap();
-            let set = if let Some(set) = SET_CACHE.get(string) {
-                set.to_string()
-            } else {
-                (0..=255)
+    if cli.no_trailing_suffix {
+        let take = cli.repeat.saturating_sub(2);
+        match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
+            (Some(set), ..) => {
+                let mut res = (0..cli.repeat)
                     .into_par_iter()
-                    .map(|i| char::from(i))
-                    .filter(|ch| re.is_match(&ch.encode_utf8(&mut [0; 4])))
-                    .collect()
-            };
-
-            (0..cli.repeat)
-                .into_par_iter()
-                .map(|_| format(&cli.prefix, &gen_custom(cli.length, &set), &cli.suffix))
-                .collect::<String>()
-        }
-        (.., Some(range), _) => {
-            let range = parse_range(range);
-            let mut rng = thread_rng();
-            (0..cli.repeat)
-                .map(|_| {
-                    format(
-                        &cli.prefix,
-                        &rng.gen_range(range.clone()).to_string(),
-                        &cli.suffix,
+                    .take(take)
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| {
+                            format(&cli.prefix, &gen_custom(rng, cli.length, &set), &cli.suffix)
+                        },
                     )
-                })
-                .collect::<String>()
+                    .collect::<String>();
+
+                res.push_str(&format(
+                    &cli.prefix,
+                    &gen_custom(&mut thread_rng(), cli.length, &set),
+                    "",
+                ));
+                res
+            }
+            (_, Some(string), ..) => {
+                let re = Regex::new(&string).unwrap();
+                let set = if let Some(set) = SET_CACHE.get(string) {
+                    set.to_string()
+                } else {
+                    (0..=255)
+                        .into_par_iter()
+                        .map(|i| char::from(i))
+                        .filter(|ch| re.is_match(&ch.encode_utf8(&mut [0; 4])))
+                        .collect()
+                };
+
+                let mut res = (0..cli.repeat)
+                    .into_par_iter()
+                    .take(take)
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| {
+                            format(&cli.prefix, &gen_custom(rng, cli.length, &set), &cli.suffix)
+                        },
+                    )
+                    .collect::<String>();
+
+                res.push_str(&format(
+                    &cli.prefix,
+                    &gen_custom(&mut thread_rng(), cli.length, &set),
+                    "",
+                ));
+                res
+            }
+            (.., Some(range), _) => {
+                let range = parse_range(range);
+                let mut res = (0..cli.repeat)
+                    .into_par_iter()
+                    .take(take)
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| {
+                            format(
+                                &cli.prefix,
+                                &rng.gen_range(range.clone()).to_string(),
+                                &cli.suffix,
+                            )
+                        },
+                    )
+                    .collect::<String>();
+
+                res.push_str(&format(
+                    &cli.prefix,
+                    &thread_rng().gen_range(range.clone()).to_string(),
+                    &cli.suffix,
+                ));
+                res
+            }
+            (.., true) => {
+                let mut res = (0..cli.repeat)
+                    .into_par_iter()
+                    .take(take)
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| format(&cli.prefix, &gen(rng, cli.length, &SET), &cli.suffix),
+                    )
+                    .collect::<String>();
+
+                res.push_str(&format(
+                    &cli.prefix,
+                    &gen(&mut thread_rng(), cli.length, &SET),
+                    "",
+                ));
+                res
+            }
+            _ => {
+                let mut res = (0..cli.repeat)
+                    .into_par_iter()
+                    .take(take)
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| {
+                            format(&cli.prefix, &gen(rng, cli.length, &SET[0..62]), &cli.suffix)
+                        },
+                    )
+                    .collect::<String>();
+
+                res.push_str(&format(
+                    &cli.prefix,
+                    &gen(&mut thread_rng(), cli.length, &SET[0..62]),
+                    "",
+                ));
+                res
+            }
         }
-        (.., true) => (0..cli.repeat)
-            .into_par_iter()
-            .map(|_| format(&cli.prefix, &gen(cli.length, &SET), &cli.suffix))
-            .collect::<String>(),
-        _ => (0..cli.repeat)
-            .into_par_iter()
-            .map(|_| format(&cli.prefix, &gen(cli.length, &SET[0..62]), &cli.suffix))
-            .collect::<String>(),
+    } else {
+        match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
+            (Some(set), ..) => (0..cli.repeat)
+                .into_par_iter()
+                .map_init(
+                    || thread_rng(),
+                    |rng, _| format(&cli.prefix, &gen_custom(rng, cli.length, &set), &cli.suffix),
+                )
+                .collect::<String>(),
+            (_, Some(string), ..) => {
+                let re = Regex::new(&string).unwrap();
+                let set = if let Some(set) = SET_CACHE.get(string) {
+                    set.to_string()
+                } else {
+                    (0..=255)
+                        .into_par_iter()
+                        .map(|i| char::from(i))
+                        .filter(|ch| re.is_match(&ch.encode_utf8(&mut [0; 4])))
+                        .collect()
+                };
+
+                (0..cli.repeat)
+                    .into_par_iter()
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| {
+                            format(&cli.prefix, &gen_custom(rng, cli.length, &set), &cli.suffix)
+                        },
+                    )
+                    .collect::<String>()
+            }
+            (.., Some(range), _) => {
+                let range = parse_range(range);
+                (0..cli.repeat)
+                    .into_par_iter()
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| {
+                            format(
+                                &cli.prefix,
+                                &rng.gen_range(range.clone()).to_string(),
+                                &cli.suffix,
+                            )
+                        },
+                    )
+                    .collect::<String>()
+            }
+            (.., true) => (0..cli.repeat)
+                .into_par_iter()
+                .map_init(
+                    || thread_rng(),
+                    |rng, _| format(&cli.prefix, &gen(rng, cli.length, &SET), &cli.suffix),
+                )
+                .collect::<String>(),
+            _ => (0..cli.repeat)
+                .into_par_iter()
+                .map_init(
+                    || thread_rng(),
+                    |rng, _| format(&cli.prefix, &gen(rng, cli.length, &SET[0..62]), &cli.suffix),
+                )
+                .collect::<String>(),
+        }
     }
 }
 

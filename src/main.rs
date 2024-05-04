@@ -1,7 +1,7 @@
 use std::fs;
 
 use clap::Parser;
-use rngstr::{copy_print, parse, par_rngstr, tokenize, Cli};
+use rngstr::{copy_print, par_rngstr, parse, tokenize, Cli};
 
 fn main() {
     let cli = Cli::parse();

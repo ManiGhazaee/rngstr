@@ -5,7 +5,7 @@ use rngstr::{copy_print, par_rngstr, parse, tokenize, Cli};
 
 fn main() {
     let cli = Cli::parse();
-    if let Some(file) = &cli.file {
+    if let Some(file) = &cli.dsl {
         let src = fs::read_to_string(&file[0]).expect("reading source file");
         let (commands, tokens) = tokenize(src, cli.as_config());
         let res = parse(&commands, &tokens, &Default::default());

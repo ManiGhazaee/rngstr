@@ -76,20 +76,22 @@ pub struct Cli {
     #[arg(long)]
     pub no_print: bool,
 
-    #[arg(long)]
-    pub no_trailing_suffix: bool,
+    /// Set trailing suffix generation to true
+    #[arg(long, short)]
+    pub trailing_suffix: bool,
 
     /// Use the password character set (A-Z, a-z, 0-9, and special characters)
     #[arg(long, conflicts_with_all(&["custom", "regex"]))]
     pub password: bool,
 
-    #[arg(long, num_args(1..))]
-    pub file: Option<Vec<String>>,
+    /// Specify path of the source file as first argument and optional second path argument for destination of the output
+    #[arg(long, short, num_args(1..))]
+    pub dsl: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct Config {
-    pub no_trailing_suffix: bool,
+    pub trailing_suffix: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -107,7 +109,7 @@ pub struct Command {
 impl Cli {
     pub fn as_config(&self) -> Config {
         Config {
-            no_trailing_suffix: self.no_trailing_suffix,
+            trailing_suffix: self.trailing_suffix,
         }
     }
 }
@@ -125,8 +127,8 @@ impl Default for Cli {
             password: false,
             no_copy: false,
             no_print: false,
-            no_trailing_suffix: false,
-            file: None,
+            trailing_suffix: false,
+            dsl: None,
         }
     }
 }
@@ -359,7 +361,7 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                 })
                 .collect::<String>();
 
-            if (i == command.cli.repeat - 1) && command.cli.no_trailing_suffix {
+            if (i == command.cli.repeat - 1) && !command.cli.trailing_suffix {
                 let ret = format(&command.cli.prefix, &temp, "");
                 ret
             } else {
@@ -488,8 +490,8 @@ pub fn rngstr(cli: &Cli) -> String {
 
 // clean code:
 pub fn par_rngstr(cli: &Cli) -> String {
-    if cli.no_trailing_suffix {
-        let take = cli.repeat.saturating_sub(2);
+    if !cli.trailing_suffix {
+        let take = cli.repeat.saturating_sub(1);
         match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
             (Some(set), ..) => {
                 let mut res = (0..cli.repeat)
@@ -560,7 +562,7 @@ pub fn par_rngstr(cli: &Cli) -> String {
                 res.push_str(&format(
                     &cli.prefix,
                     &thread_rng().gen_range(range.clone()).to_string(),
-                    &cli.suffix,
+                    "",
                 ));
                 res
             }
@@ -667,7 +669,9 @@ pub fn par_rngstr(cli: &Cli) -> String {
 }
 
 fn overwrite_cli(cli: &mut Cli, config: &Config) {
-    cli.no_trailing_suffix = config.no_trailing_suffix;
+    if config.trailing_suffix {
+        cli.trailing_suffix = true;
+    }
 }
 
 pub fn copy_print(cli: &Cli, res: String) {

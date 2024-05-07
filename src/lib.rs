@@ -101,9 +101,16 @@ pub enum Token {
     Target,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct Command {
-    cli: Cli,
+#[derive(Debug, Clone)]
+pub enum Command {
+    Cli(Cli),
+    Macro(Vec<Token>),
+}
+
+impl Default for Command {
+    fn default() -> Self {
+        Command::Cli(Cli::default())
+    }
 }
 
 impl Cli {
@@ -141,14 +148,36 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
         if trimmed_line.starts_with('!') {
             trimmed_line = &trimmed_line[1..];
             let mut name = String::new();
-            for (i, ch) in trimmed_line.chars().enumerate() {
+            let mut chars = trimmed_line.chars().enumerate().peekable();
+            while let Some((i, ch)) = chars.next() {
                 if ch == ':' {
                     let name = name.trim().to_string();
-                    let args = parse_args(&trimmed_line[i + 1..]);
-                    let mut cli = Cli::parse_from(args);
-                    overwrite_cli(&mut cli, &config);
-                    let command = Command { cli };
-                    commands.insert(name, command);
+                    if let Some((_, '(')) = chars.peek() {
+                        chars.next();
+                        let mut paren = 1;
+                        let mut temp = String::new();
+                        while let Some((_, ch)) = chars.next() {
+                            match ch {
+                                '(' => paren += 1,
+                                ')' => paren -= 1,
+                                _ => (),
+                            }
+                            if paren == 0 {
+                                break;
+                            }
+                            temp.push(ch);
+                        }
+                        let tokens = _tokenize(&temp, &commands)
+                            .expect(&format!("no command call found at {}", name));
+                        let command = Command::Macro(tokens);
+                        commands.insert(name, command);
+                    } else {
+                        let args = parse_args(&trimmed_line[i + 1..]);
+                        let mut cli = Cli::parse_from(args);
+                        overwrite_cli(&mut cli, &config);
+                        let command = Command::Cli(cli);
+                        commands.insert(name, command);
+                    }
                     break;
                 }
                 name.push(ch);
@@ -181,6 +210,12 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
 
     let src = &src[i..];
 
+    let tokens = _tokenize(src, &commands).expect("no command call found in the given source file");
+
+    (commands, tokens)
+}
+
+fn _tokenize(src: &str, commands: &Commands) -> Option<Vec<Token>> {
     let mut chars: Peekable<Enumerate<Chars>> = src.chars().enumerate().peekable();
     let mut tokens = Vec::new();
     let mut string_token = String::new();
@@ -207,10 +242,10 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
     tokens.push(Token::String(string_token.clone()));
 
     if !command_call_found {
-        panic!("no command call found in the given source file")
+        None
+    } else {
+        Some(tokens)
     }
-
-    (commands, tokens)
 }
 
 fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) -> Token {
@@ -328,48 +363,51 @@ fn parse_args(string: &str) -> Vec<String> {
 }
 
 pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> String {
-    (0..command.cli.repeat)
-        .into_par_iter()
-        .map(|i| {
-            let gen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-            let temp = tokens
-                .into_par_iter()
-                .map(|token| match token {
-                    Token::Command { name, tokens } => parse(
-                        commands,
-                        tokens,
-                        commands
-                            .get(name)
-                            .expect(&format!("command {} not found", name)),
-                    ),
-                    Token::String(string) => string.to_string(),
-                    Token::Target => {
-                        let mut lock = gen.lock().unwrap();
-                        if let Some(gen) = &*lock {
-                            gen.to_string()
-                        } else {
-                            let str = rngstr(&Cli {
-                                repeat: 1,
-                                prefix: String::new(),
-                                suffix: String::new(),
-                                ..command.cli.clone()
-                            });
-                            *lock = Some(str.clone());
-                            str
+    match command {
+        Command::Cli(cli) => (0..cli.repeat)
+            .into_par_iter()
+            .map(|i| {
+                let gen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+                let temp = tokens
+                    .into_par_iter()
+                    .map(|token| match token {
+                        Token::Command { name, tokens } => parse(
+                            commands,
+                            tokens,
+                            commands
+                                .get(name)
+                                .expect(&format!("command {} not found", name)),
+                        ),
+                        Token::String(string) => string.to_string(),
+                        Token::Target => {
+                            let mut lock = gen.lock().unwrap();
+                            if let Some(gen) = &*lock {
+                                gen.to_string()
+                            } else {
+                                let str = rngstr(&Cli {
+                                    repeat: 1,
+                                    prefix: String::new(),
+                                    suffix: String::new(),
+                                    ..cli.clone()
+                                });
+                                *lock = Some(str.clone());
+                                str
+                            }
                         }
-                    }
-                })
-                .collect::<String>();
+                    })
+                    .collect::<String>();
 
-            if (i == command.cli.repeat - 1) && !command.cli.trailing_suffix {
-                let ret = format(&command.cli.prefix, &temp, "");
-                ret
-            } else {
-                let ret = format(&command.cli.prefix, &temp, &command.cli.suffix);
-                ret
-            }
-        })
-        .collect::<String>()
+                if (i == cli.repeat - 1) && !cli.trailing_suffix {
+                    let ret = format(&cli.prefix, &temp, "");
+                    ret
+                } else {
+                    let ret = format(&cli.prefix, &temp, &cli.suffix);
+                    ret
+                }
+            })
+            .collect::<String>(),
+        Command::Macro(tokens) => parse(commands, tokens, &Command::default()),
+    }
 }
 
 const SET: [char; 94] = [
@@ -514,7 +552,7 @@ pub fn par_rngstr(cli: &Cli) -> String {
             }
             (_, Some(string), ..) => {
                 let re = Regex::new(&string).unwrap();
-                let set = if let Some(set) = SET_CACHE.get(string) {
+                let set: String = if let Some(set) = SET_CACHE.get(string) {
                     set.to_string()
                 } else {
                     (0..=255)

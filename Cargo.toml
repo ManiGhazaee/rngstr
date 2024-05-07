@@ -1,15 +1,13 @@
 [package]
 name = "rngstr"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 repository = "https://github.com/ManiGhazaee/rngstr"
 authors = ["ManiGhazaee <hosseinghazaee1@gmail.com>"]
-description = "A cli tool that generates random strings of characters with options to customize the character set or length of the generated string"
+description = "A cli tool for generating random strings of characters with customization options and a small domain specific language"
 readme = "README.md"
 license = "MIT"
 keywords = ["cli", "random", "rng", "string"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 rand = "0.8.5"

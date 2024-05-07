@@ -26,7 +26,7 @@ type Commands = HashMap<String, Command>;
 #[command(
     version,
     about,
-    long_about = "A cli tool that generates random strings of characters with options to customize the character set or length of the generated string.\nDefault character set = (A-Z, a-z, 0-9)"
+    long_about = "A cli tool for generating random strings of characters with customization options and a small domain specific language"
 )]
 #[command(next_line_help = true)]
 pub struct Cli {

@@ -1,6 +1,6 @@
 # rngstr
 
-A command-line tool that generates random strings of characters with options to customize the character set or length of the generated string, with a small domain specific language.
+A cli tool for generating random strings of characters with customization options and a small domain specific language.
 
 ## Installation
 
@@ -33,7 +33,7 @@ rngstr [OPTIONS]
           Specify number of times string should be generated
 
 - `-d, --dsl <DSL>...`:
-          Specify path of the source file as first argument and optional second path argument for destination of the output
+          Specify path of the source file as first argument and optional path of destination file as second argument (it will print to terminal if not specified) 
 
 - `--no-copy`:
           Don't copy the generated result to clipboard
@@ -57,13 +57,13 @@ rngstr [OPTIONS]
 
 By default, `rngstr` generates random strings with the following settings:
 
-- character set = (A-Z, a-z, 0-9)
-- length = 0
-- copy to clipboard = true
-- print = true
-- suffix = ""
-- prefix = ""
-- repeat = 1
+- character set = `[A-Za-z0-9]`
+- length = `0`
+- copy to clipboard = `true`
+- print = `true`
+- suffix = `""`
+- prefix = `""`
+- repeat = `1`
 
 ## Examples
 
@@ -105,7 +105,7 @@ rngstr -c 0001 -l 8 -p "0b" -s " " -r 3
 
 ### Command call
 
-After the first non-comment line (i.e., a trimmed line not starting with `!`), you can call the declared commands using the following syntax:
+After the first non-command line (a trimmed line not starting with `!`), you can call the declared commands using the following syntax:
 
 ```
 !<name>()

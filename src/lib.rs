@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
     collections::HashMap,
     f32::NAN,
@@ -11,7 +12,7 @@ use clap::Parser;
 use cli_clipboard::set_contents;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 use rayon::prelude::*;
-use regex::Regex;
+use regex::bytes::Regex;
 
 #[macro_use]
 extern crate lazy_static;
@@ -96,20 +97,33 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub enum Token {
-    Command { name: String, tokens: Vec<Token> },
+    Command {
+        name: String,
+        tokens: Vec<Token>,
+        args: Option<Vec<Vec<Token>>>,
+    },
     String(String),
     Target,
 }
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    Cli(Cli),
-    Macro(Vec<Token>),
+    Command { params: Option<Params>, cli: Cli },
+    Macro { tokens: Vec<Token> },
+}
+
+#[derive(Debug, Clone)]
+pub struct Params {
+    raw: String,
+    params: Vec<String>,
 }
 
 impl Default for Command {
     fn default() -> Self {
-        Command::Cli(Cli::default())
+        Command::Command {
+            params: None,
+            cli: Cli::default(),
+        }
     }
 }
 
@@ -140,6 +154,19 @@ impl Default for Cli {
     }
 }
 
+fn split_params(str: &str) -> Vec<String> {
+    str.split(',')
+        .filter_map(|i| {
+            let t = i.trim();
+            if !t.is_empty() {
+                Some(t.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
 pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
     let mut commands: Commands = HashMap::new();
     for line in src.lines() {
@@ -149,36 +176,62 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
             trimmed_line = &trimmed_line[1..];
             let mut name = String::new();
             let mut chars = trimmed_line.chars().enumerate().peekable();
+            let mut params = None::<Vec<String>>;
             while let Some((i, ch)) = chars.next() {
-                if ch == ':' {
-                    let name = name.trim().to_string();
-                    if let Some((_, '(')) = chars.peek() {
-                        chars.next();
-                        let mut paren = 1;
+                match ch {
+                    '[' => {
                         let mut temp = String::new();
                         while let Some((_, ch)) = chars.next() {
-                            match ch {
-                                '(' => paren += 1,
-                                ')' => paren -= 1,
-                                _ => (),
-                            }
-                            if paren == 0 {
+                            if ch == ']' {
                                 break;
                             }
                             temp.push(ch);
                         }
-                        let tokens = _tokenize(&temp, &commands)
-                            .expect(&format!("no command call found at {}", name));
-                        let command = Command::Macro(tokens);
-                        commands.insert(name, command);
-                    } else {
-                        let args = parse_args(&trimmed_line[i + 1..]);
-                        let mut cli = Cli::parse_from(args);
-                        overwrite_cli(&mut cli, &config);
-                        let command = Command::Cli(cli);
-                        commands.insert(name, command);
+                        params = Some(split_params(&temp));
+                        continue;
                     }
-                    break;
+                    ':' => {
+                        let name = name.trim().to_string();
+                        if let Some((_, '(')) = chars.peek() {
+                            chars.next();
+                            let mut paren = 1;
+                            let mut temp = String::new();
+                            while let Some((_, ch)) = chars.next() {
+                                match ch {
+                                    '(' => paren += 1,
+                                    ')' => paren -= 1,
+                                    _ => (),
+                                }
+                                if paren == 0 {
+                                    break;
+                                }
+                                temp.push(ch);
+                            }
+                            let tokens = _tokenize(&temp, &commands);
+                            let command = Command::Macro { tokens };
+                            commands.insert(name, command);
+                        } else {
+                            let raw_args = &trimmed_line[i + 1..];
+                            if let Some(params) = params {
+                                let command = Command::Command {
+                                    params: Some(Params {
+                                        raw: raw_args.to_string(),
+                                        params,
+                                    }),
+                                    cli: Cli::default(),
+                                };
+                                commands.insert(name, command);
+                            } else {
+                                let args = parse_args(raw_args);
+                                let mut cli = Cli::parse_from(args);
+                                overwrite_cli(&mut cli, &config);
+                                let command = Command::Command { params: None, cli };
+                                commands.insert(name, command);
+                            }
+                        }
+                        break;
+                    }
+                    _ => (),
                 }
                 name.push(ch);
             }
@@ -210,23 +263,21 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
 
     let src = &src[i..];
 
-    let tokens = _tokenize(src, &commands).expect("no command call found in the given source file");
+    let tokens = _tokenize(src, &commands);
 
     (commands, tokens)
 }
 
-fn _tokenize(src: &str, commands: &Commands) -> Option<Vec<Token>> {
+fn _tokenize(src: &str, commands: &Commands) -> Vec<Token> {
     let mut chars: Peekable<Enumerate<Chars>> = src.chars().enumerate().peekable();
     let mut tokens = Vec::new();
     let mut string_token = String::new();
-    let mut command_call_found = false;
     while let Some((_, ch)) = chars.next() {
         match ch {
             '!' => {
                 tokens.push(Token::String(string_token.clone()));
                 tokens.push(parse_command_call(&mut chars, &commands));
                 string_token.clear();
-                command_call_found = true;
                 continue;
             }
             '\\' => {
@@ -241,18 +292,39 @@ fn _tokenize(src: &str, commands: &Commands) -> Option<Vec<Token>> {
     }
     tokens.push(Token::String(string_token.clone()));
 
-    if !command_call_found {
-        None
-    } else {
-        Some(tokens)
-    }
+    tokens
 }
 
 fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) -> Token {
     let mut name = String::new();
+    let mut args = None::<Vec<Vec<Token>>>;
     while let Some((_, ch)) = chars.next() {
-        if ch == '(' {
-            break;
+        match ch {
+            '(' => break,
+            '[' => {
+                let mut brack = 1;
+                let mut temp = String::new();
+                while let Some((_, ch)) = chars.next() {
+                    match ch {
+                        '[' => brack += 1,
+                        ']' => brack -= 1,
+                        _ => (),
+                    }
+                    if brack == 0 {
+                        break;
+                    }
+                    temp.push(ch);
+                }
+                let _args = split_params(&temp);
+                args = Some(
+                    _args
+                        .into_iter()
+                        .map(|i| _tokenize(&i, commands))
+                        .collect::<Vec<_>>(),
+                );
+                continue;
+            }
+            _ => (),
         }
         name.push(ch);
     }
@@ -296,7 +368,7 @@ fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
     }
     tokens.push(Token::String(string_token));
 
-    Token::Command { name, tokens }
+    Token::Command { name, tokens, args }
 }
 
 fn parse_args(string: &str) -> Vec<String> {
@@ -364,20 +436,25 @@ fn parse_args(string: &str) -> Vec<String> {
 
 pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> String {
     match command {
-        Command::Cli(cli) => (0..cli.repeat)
+        Command::Command { cli, .. } => (0..cli.repeat)
             .into_par_iter()
             .map(|i| {
                 let gen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
                 let temp = tokens
                     .into_par_iter()
                     .map(|token| match token {
-                        Token::Command { name, tokens } => parse(
-                            commands,
-                            tokens,
-                            commands
+                        Token::Command { name, tokens, args } => {
+                            let command = commands
                                 .get(name)
-                                .expect(&format!("command {} not found", name)),
-                        ),
+                                .expect(&format!("command {} not found", name));
+                            let command = if let Some(args) = args {
+                                let cli = parse_param(args, command, commands);
+                                Command::Command { params: None, cli }
+                            } else {
+                                command.to_owned()
+                            };
+                            parse(commands, tokens, &command)
+                        }
                         Token::String(string) => string.to_string(),
                         Token::Target => {
                             let mut lock = gen.lock().unwrap();
@@ -406,7 +483,33 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                 }
             })
             .collect::<String>(),
-        Command::Macro(tokens) => parse(commands, tokens, &Command::default()),
+        Command::Macro { tokens } => parse(commands, tokens, &Command::default()),
+    }
+}
+
+fn parse_param(args: &Vec<Vec<Token>>, command: &Command, commands: &Commands) -> Cli {
+    if let Command::Command {
+        params: Some(params),
+        ..
+    } = command
+    {
+        let mut raw_args = params.raw.to_owned();
+        for (i, p) in params.params.iter().enumerate() {
+            raw_args = raw_args.replace(
+                p,
+                &parse(
+                    commands,
+                    args.get(i)
+                        .expect(&format!("argument of {} not found at command call", p)),
+                    &Default::default(),
+                ),
+            );
+        }
+        let args = parse_args(&raw_args);
+        let cli = Cli::parse_from(args);
+        cli
+    } else {
+        panic!()
     }
 }
 
@@ -485,7 +588,7 @@ pub fn rngstr(cli: &Cli) -> String {
                 let mut buf = [0; 4];
                 (0..=255)
                     .map(|i| char::from(i))
-                    .filter(|ch| re.is_match(&ch.encode_utf8(&mut buf)))
+                    .filter(|ch| re.is_match(ch.encode_utf8(&mut buf).as_bytes()))
                     .collect()
             };
 
@@ -558,7 +661,7 @@ pub fn par_rngstr(cli: &Cli) -> String {
                     (0..=255)
                         .into_par_iter()
                         .map(|i| char::from(i))
-                        .filter(|ch| re.is_match(&ch.encode_utf8(&mut [0; 4])))
+                        .filter(|ch| re.is_match(ch.encode_utf8(&mut [0; 4]).as_bytes()))
                         .collect()
                 };
 
@@ -658,7 +761,7 @@ pub fn par_rngstr(cli: &Cli) -> String {
                     (0..=255)
                         .into_par_iter()
                         .map(|i| char::from(i))
-                        .filter(|ch| re.is_match(&ch.encode_utf8(&mut [0; 4])))
+                        .filter(|ch| re.is_match(ch.encode_utf8(&mut [0; 4]).as_bytes()))
                         .collect()
                 };
 

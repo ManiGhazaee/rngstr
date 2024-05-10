@@ -1,7 +1,8 @@
 use core::panic;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     f32::NAN,
+    hash::Hash,
     iter::{Enumerate, Peekable},
     ops::Range,
     str::Chars,
@@ -19,6 +20,153 @@ extern crate lazy_static;
 
 lazy_static! {
     static ref SET_CACHE: HashMap<String, String> = HashMap::new();
+    static ref UTILS: Mutex<[(String, Command); 7]> = Mutex::new([
+        (
+            "repeat".into(),
+            Command::Command {
+                params: Some(Params {
+                    raw: "--repeat count -s suffix".into(),
+                    params: vec!["count".into(), "suffix".into()],
+                }),
+                cli: Default::default(),
+            }
+        ),
+        (
+            "u32".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["start".into(), "end".into()],
+                }),
+                f: u32,
+            }
+        ),
+        (
+            "i32".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["start".into(), "end".into()],
+                }),
+                f: i32,
+            }
+        ),
+        (
+            "f32".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["start".into(), "end".into()],
+                }),
+                f: f32,
+            }
+        ),
+        (
+            "f32_array".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
+                }),
+                f: f32_array,
+            }
+        ),
+        (
+            "i32_array".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
+                }),
+                f: i32_array,
+            }
+        ),
+        (
+            "u32_array".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
+                }),
+                f: u32_array,
+            }
+        )
+    ]);
+}
+
+fn f32(args: &Vec<String>) -> String {
+    let (start, end) = (
+        args[0].parse::<f32>().unwrap(),
+        args[1].parse::<f32>().unwrap(),
+    );
+    thread_rng().gen_range(start..end).to_string()
+}
+
+fn i32(args: &Vec<String>) -> String {
+    let (start, end) = (
+        args[0].parse::<i32>().unwrap(),
+        args[1].parse::<i32>().unwrap(),
+    );
+    thread_rng().gen_range(start..end).to_string()
+}
+
+fn u32(args: &Vec<String>) -> String {
+    let (start, end) = (
+        args[0].parse::<u32>().unwrap(),
+        args[1].parse::<u32>().unwrap(),
+    );
+    thread_rng().gen_range(start..end).to_string()
+}
+
+fn f32_array(args: &Vec<String>) -> String {
+    let (start, end, len) = (
+        args[0].parse::<f32>().unwrap(),
+        args[1].parse::<f32>().unwrap(),
+        args[2].parse::<usize>().unwrap(),
+    );
+    let mut res = Vec::new();
+    let mut rng = thread_rng();
+    for _ in 0..len {
+        res.push(rng.gen_range(start..end).to_string());
+    }
+    let mut res = res.join(", ");
+    res.insert_str(0, "[");
+    res.push_str("]");
+    res
+}
+
+fn i32_array(args: &Vec<String>) -> String {
+    let (start, end, len) = (
+        args[0].parse::<i32>().unwrap(),
+        args[1].parse::<i32>().unwrap(),
+        args[2].parse::<usize>().unwrap(),
+    );
+    let mut res = Vec::new();
+    let mut rng = thread_rng();
+    for _ in 0..len {
+        res.push(rng.gen_range(start..end).to_string());
+    }
+    let mut res = res.join(", ");
+    res.insert_str(0, "[");
+    res.push_str("]");
+    res
+}
+
+fn u32_array(args: &Vec<String>) -> String {
+    let (start, end, len) = (
+        args[0].parse::<u32>().unwrap(),
+        args[1].parse::<u32>().unwrap(),
+        args[2].parse::<usize>().unwrap(),
+    );
+    let mut res = Vec::new();
+    let mut rng = thread_rng();
+    for _ in 0..len {
+        res.push(rng.gen_range(start..end).to_string());
+    }
+    let mut res = res.join(", ");
+    res.insert_str(0, "[");
+    res.push_str("]");
+    res
 }
 
 type Commands = HashMap<String, Command>;
@@ -108,8 +256,17 @@ pub enum Token {
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    Command { params: Option<Params>, cli: Cli },
-    Macro { tokens: Vec<Token> },
+    Command {
+        params: Option<Params>,
+        cli: Cli,
+    },
+    Macro {
+        tokens: Vec<Token>,
+    },
+    Builtin {
+        params: Option<Params>,
+        f: fn(&Vec<String>) -> String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -154,8 +311,8 @@ impl Default for Cli {
     }
 }
 
-fn split_params(str: &str) -> Vec<String> {
-    str.split(',')
+fn split_trim_by(str: &str, pat: char) -> Vec<String> {
+    str.split(pat)
         .filter_map(|i| {
             let t = i.trim();
             if !t.is_empty() {
@@ -168,7 +325,44 @@ fn split_params(str: &str) -> Vec<String> {
 }
 
 pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
-    let mut commands: Commands = HashMap::new();
+    let commands = commands(&src, &config);
+    let src = &src[first_text_byte(&src)..];
+    let tokens = tokenize_text(src, &commands);
+
+    (commands, tokens)
+}
+
+fn first_text_byte(src: &str) -> usize {
+    let mut i = 0;
+    let bytes = src.as_bytes();
+    let mut bang = false;
+    while i < bytes.len() {
+        match bytes[i] as char {
+            '!' => bang = true,
+            '\n' | '\r' => bang = false,
+            ' ' | '\t' => (),
+            _ => {
+                if !bang {
+                    break;
+                }
+            }
+        }
+        i += 1;
+    }
+    i
+}
+
+fn hashmap_from<K: Eq + Hash + Default, V: Default>(slice: &mut [(K, V)]) -> HashMap<K, V> {
+    let mut h = HashMap::new();
+    for i in 0..slice.len() {
+        let s = std::mem::take(&mut slice[i]);
+        h.insert(s.0, s.1);
+    }
+    h
+}
+
+fn commands(src: &str, config: &Config) -> Commands {
+    let mut commands: Commands = hashmap_from(&mut *UTILS.lock().unwrap());
     for line in src.lines() {
         let line_string = line.to_string();
         let mut trimmed_line = line_string.trim_start();
@@ -176,7 +370,7 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
             trimmed_line = &trimmed_line[1..];
             let mut name = String::new();
             let mut chars = trimmed_line.chars().enumerate().peekable();
-            let mut params = None::<Vec<String>>;
+            let mut params = None;
             while let Some((i, ch)) = chars.next() {
                 match ch {
                     '[' => {
@@ -187,7 +381,7 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
                             }
                             temp.push(ch);
                         }
-                        params = Some(split_params(&temp));
+                        params = Some(split_trim_by(&temp, ','));
                         continue;
                     }
                     ':' => {
@@ -207,7 +401,7 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
                                 }
                                 temp.push(ch);
                             }
-                            let tokens = _tokenize(&temp, &commands);
+                            let tokens = tokenize_text(&temp, &commands);
                             let command = Command::Macro { tokens };
                             commands.insert(name, command);
                         } else {
@@ -239,36 +433,10 @@ pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
             break;
         }
     }
-
-    if commands.is_empty() {
-        panic!("no command found in the given source file")
-    }
-
-    let mut i = 0;
-    let bytes = src.as_bytes();
-    let mut bang = false;
-    while i < bytes.len() {
-        match bytes[i] as char {
-            '!' => bang = true,
-            '\n' | '\r' => bang = false,
-            ' ' | '\t' => (),
-            _ => {
-                if !bang {
-                    break;
-                }
-            }
-        }
-        i += 1;
-    }
-
-    let src = &src[i..];
-
-    let tokens = _tokenize(src, &commands);
-
-    (commands, tokens)
+    commands
 }
 
-fn _tokenize(src: &str, commands: &Commands) -> Vec<Token> {
+fn tokenize_text(src: &str, commands: &Commands) -> Vec<Token> {
     let mut chars: Peekable<Enumerate<Chars>> = src.chars().enumerate().peekable();
     let mut tokens = Vec::new();
     let mut string_token = String::new();
@@ -276,7 +444,7 @@ fn _tokenize(src: &str, commands: &Commands) -> Vec<Token> {
         match ch {
             '!' => {
                 tokens.push(Token::String(string_token.clone()));
-                tokens.push(parse_command_call(&mut chars, &commands));
+                tokens.push(command_call_token(&mut chars, &commands));
                 string_token.clear();
                 continue;
             }
@@ -295,7 +463,21 @@ fn _tokenize(src: &str, commands: &Commands) -> Vec<Token> {
     tokens
 }
 
-fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) -> Token {
+fn split_with_positions(str: &str, positions: HashSet<usize>) -> Vec<String> {
+    let mut chars = str.chars().enumerate();
+    let mut temp = 0;
+    let mut res = Vec::new();
+    while let Some((i, _)) = chars.next() {
+        if positions.contains(&i) {
+            res.push(str[temp..i].trim().to_string());
+            temp = i + 1;
+        }
+    }
+    res.push(str[temp..str.len()].trim().to_string());
+    res
+}
+
+fn command_call_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) -> Token {
     let mut name = String::new();
     let mut args = None::<Vec<Vec<Token>>>;
     while let Some((_, ch)) = chars.next() {
@@ -304,8 +486,23 @@ fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
             '[' => {
                 let mut brack = 1;
                 let mut temp = String::new();
+                let mut pos = 0;
+                let mut comma_poses: HashSet<usize> = HashSet::new();
+                let mut string = (false, '"');
                 while let Some((_, ch)) = chars.next() {
                     match ch {
+                        ',' => {
+                            if brack == 1 && !string.0 {
+                                comma_poses.insert(pos);
+                            }
+                        }
+                        '"' | '\'' => {
+                            if string.0 && string.1 == ch {
+                                string = (false, '"');
+                            } else {
+                                string = (true, ch);
+                            }
+                        }
                         '[' => brack += 1,
                         ']' => brack -= 1,
                         _ => (),
@@ -314,12 +511,13 @@ fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
                         break;
                     }
                     temp.push(ch);
+                    pos += 1;
                 }
-                let _args = split_params(&temp);
+                let _args = split_with_positions(&temp, comma_poses);
                 args = Some(
                     _args
                         .into_iter()
-                        .map(|i| _tokenize(&i, commands))
+                        .map(|i| tokenize_text(&i, commands))
                         .collect::<Vec<_>>(),
                 );
                 continue;
@@ -345,7 +543,7 @@ fn parse_command_call(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
             }
             '!' => {
                 tokens.push(Token::String(string_token.clone()));
-                tokens.push(parse_command_call(chars, commands));
+                tokens.push(command_call_token(chars, commands));
                 string_token.clear();
                 continue;
             }
@@ -414,7 +612,7 @@ fn parse_args(string: &str) -> Vec<String> {
         }
         bytes = bytes[1..bytes.len() - 1].to_vec();
         let mut i = 0;
-        while i < bytes.len() - 1 {
+        while i < bytes.len().saturating_sub(1) {
             if bytes[i] == b'\\' && (bytes[i + 1] == b'"' || bytes[i + 1] == b'\'') {
                 bytes.remove(i);
             } else if bytes[i] == b'\\' && (bytes[i + 1] == b'n') {
@@ -436,6 +634,9 @@ fn parse_args(string: &str) -> Vec<String> {
 
 pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> String {
     match command {
+        Command::Builtin { .. } => {
+            panic!()
+        }
         Command::Command { cli, .. } => (0..cli.repeat)
             .into_par_iter()
             .map(|i| {
@@ -446,10 +647,19 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                         Token::Command { name, tokens, args } => {
                             let command = commands
                                 .get(name)
-                                .expect(&format!("command {} not found", name));
+                                .expect(&format!("command '{}' not found", name));
                             let command = if let Some(args) = args {
-                                let cli = parse_param(args, command, commands);
-                                Command::Command { params: None, cli }
+                                match command {
+                                    Command::Builtin { f, .. } => {
+                                        let args = command_args(args, commands);
+                                        return (f)(&args);
+                                    }
+                                    _ => {
+                                        let cli =
+                                            cli_from_command_args(args, command, name, commands);
+                                        Command::Command { params: None, cli }
+                                    }
+                                }
                             } else {
                                 command.to_owned()
                             };
@@ -487,7 +697,18 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
     }
 }
 
-fn parse_param(args: &Vec<Vec<Token>>, command: &Command, commands: &Commands) -> Cli {
+fn command_args(args: &Vec<Vec<Token>>, commands: &Commands) -> Vec<String> {
+    args.iter()
+        .map(|i| parse(commands, i, &Default::default()))
+        .collect()
+}
+
+fn cli_from_command_args(
+    args: &Vec<Vec<Token>>,
+    command: &Command,
+    name: &str,
+    commands: &Commands,
+) -> Cli {
     if let Command::Command {
         params: Some(params),
         ..
@@ -500,7 +721,7 @@ fn parse_param(args: &Vec<Vec<Token>>, command: &Command, commands: &Commands) -
                 &parse(
                     commands,
                     args.get(i)
-                        .expect(&format!("argument of {} not found at command call", p)),
+                        .expect(&format!("expected '{}' argument at command '{}'", p, name,)),
                     &Default::default(),
                 ),
             );

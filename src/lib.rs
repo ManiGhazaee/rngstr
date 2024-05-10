@@ -15,12 +15,15 @@ use rand::{rngs::ThreadRng, thread_rng, Rng};
 use rayon::prelude::*;
 use regex::bytes::Regex;
 
+mod builtins;
+mod macros;
+
 #[macro_use]
 extern crate lazy_static;
 
 lazy_static! {
     static ref SET_CACHE: HashMap<String, String> = HashMap::new();
-    static ref UTILS: Mutex<[(String, Command); 7]> = Mutex::new([
+    static ref UTILS: Mutex<[(String, Command); 11]> = Mutex::new([
         (
             "repeat".into(),
             Command::Command {
@@ -32,13 +35,53 @@ lazy_static! {
             }
         ),
         (
+            "cmd".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["string".into()],
+                }),
+                f: builtins::cmd,
+            }
+        ),
+        (
+            "cmd_array".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["string".into(), "length".into()],
+                }),
+                f: builtins::cmd_array,
+            }
+        ),
+        (
+            "array".into(),
+            Command::Macro {
+                params: Some(Params {
+                    raw: "[!repeat<length, \", \">(!command())]".into(),
+                    params: vec!["command".into(), "length".into(),],
+                },),
+                tokens: vec![],
+            }
+        ),
+        (
+            "array_fill".into(),
+            Command::Macro {
+                params: Some(Params {
+                    raw: "[!repeat<length, \", \">(element)]".into(),
+                    params: vec!["element".into(), "length".into(),],
+                },),
+                tokens: vec![],
+            }
+        ),
+        (
             "u32".into(),
             Command::Builtin {
                 params: Some(Params {
                     raw: "".into(),
                     params: vec!["start".into(), "end".into()],
                 }),
-                f: u32,
+                f: builtins::u32,
             }
         ),
         (
@@ -48,7 +91,7 @@ lazy_static! {
                     raw: "".into(),
                     params: vec!["start".into(), "end".into()],
                 }),
-                f: i32,
+                f: builtins::i32,
             }
         ),
         (
@@ -58,7 +101,7 @@ lazy_static! {
                     raw: "".into(),
                     params: vec!["start".into(), "end".into()],
                 }),
-                f: f32,
+                f: builtins::f32,
             }
         ),
         (
@@ -68,7 +111,7 @@ lazy_static! {
                     raw: "".into(),
                     params: vec!["range_start".into(), "range_end".into(), "length".into()],
                 }),
-                f: f32_array,
+                f: builtins::f32_array,
             }
         ),
         (
@@ -78,7 +121,7 @@ lazy_static! {
                     raw: "".into(),
                     params: vec!["range_start".into(), "range_end".into(), "length".into()],
                 }),
-                f: i32_array,
+                f: builtins::i32_array,
             }
         ),
         (
@@ -88,88 +131,11 @@ lazy_static! {
                     raw: "".into(),
                     params: vec!["range_start".into(), "range_end".into(), "length".into()],
                 }),
-                f: u32_array,
+                f: builtins::u32_array,
             }
         )
     ]);
 }
-
-fn f32(args: &Vec<String>) -> String {
-    let (start, end) = (
-        args[0].parse::<f32>().unwrap(),
-        args[1].parse::<f32>().unwrap(),
-    );
-    thread_rng().gen_range(start..end).to_string()
-}
-
-fn i32(args: &Vec<String>) -> String {
-    let (start, end) = (
-        args[0].parse::<i32>().unwrap(),
-        args[1].parse::<i32>().unwrap(),
-    );
-    thread_rng().gen_range(start..end).to_string()
-}
-
-fn u32(args: &Vec<String>) -> String {
-    let (start, end) = (
-        args[0].parse::<u32>().unwrap(),
-        args[1].parse::<u32>().unwrap(),
-    );
-    thread_rng().gen_range(start..end).to_string()
-}
-
-fn f32_array(args: &Vec<String>) -> String {
-    let (start, end, len) = (
-        args[0].parse::<f32>().unwrap(),
-        args[1].parse::<f32>().unwrap(),
-        args[2].parse::<usize>().unwrap(),
-    );
-    let mut res = Vec::new();
-    let mut rng = thread_rng();
-    for _ in 0..len {
-        res.push(rng.gen_range(start..end).to_string());
-    }
-    let mut res = res.join(", ");
-    res.insert_str(0, "[");
-    res.push_str("]");
-    res
-}
-
-fn i32_array(args: &Vec<String>) -> String {
-    let (start, end, len) = (
-        args[0].parse::<i32>().unwrap(),
-        args[1].parse::<i32>().unwrap(),
-        args[2].parse::<usize>().unwrap(),
-    );
-    let mut res = Vec::new();
-    let mut rng = thread_rng();
-    for _ in 0..len {
-        res.push(rng.gen_range(start..end).to_string());
-    }
-    let mut res = res.join(", ");
-    res.insert_str(0, "[");
-    res.push_str("]");
-    res
-}
-
-fn u32_array(args: &Vec<String>) -> String {
-    let (start, end, len) = (
-        args[0].parse::<u32>().unwrap(),
-        args[1].parse::<u32>().unwrap(),
-        args[2].parse::<usize>().unwrap(),
-    );
-    let mut res = Vec::new();
-    let mut rng = thread_rng();
-    for _ in 0..len {
-        res.push(rng.gen_range(start..end).to_string());
-    }
-    let mut res = res.join(", ");
-    res.insert_str(0, "[");
-    res.push_str("]");
-    res
-}
-
-type Commands = HashMap<String, Command>;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -261,6 +227,7 @@ pub enum Command {
         cli: Cli,
     },
     Macro {
+        params: Option<Params>,
         tokens: Vec<Token>,
     },
     Builtin {
@@ -274,6 +241,8 @@ pub struct Params {
     raw: String,
     params: Vec<String>,
 }
+
+type Commands = HashMap<String, Command>;
 
 impl Default for Command {
     fn default() -> Self {
@@ -290,12 +259,18 @@ impl Cli {
             trailing_suffix: self.trailing_suffix,
         }
     }
+
+    pub fn config(&mut self, config: &Config) {
+        if config.trailing_suffix {
+            self.trailing_suffix = true;
+        }
+    }
 }
 
 impl Default for Cli {
     fn default() -> Self {
         Self {
-            length: 32,
+            length: 0,
             custom: None,
             regex: None,
             range: None,
@@ -311,21 +286,8 @@ impl Default for Cli {
     }
 }
 
-fn split_trim_by(str: &str, pat: char) -> Vec<String> {
-    str.split(pat)
-        .filter_map(|i| {
-            let t = i.trim();
-            if !t.is_empty() {
-                Some(t.to_string())
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>()
-}
-
 pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
-    let commands = commands(&src, &config);
+    let commands = command_decs(&src, &config);
     let src = &src[first_text_byte(&src)..];
     let tokens = tokenize_text(src, &commands);
 
@@ -352,16 +314,7 @@ fn first_text_byte(src: &str) -> usize {
     i
 }
 
-fn hashmap_from<K: Eq + Hash + Default, V: Default>(slice: &mut [(K, V)]) -> HashMap<K, V> {
-    let mut h = HashMap::new();
-    for i in 0..slice.len() {
-        let s = std::mem::take(&mut slice[i]);
-        h.insert(s.0, s.1);
-    }
-    h
-}
-
-fn commands(src: &str, config: &Config) -> Commands {
+fn command_decs(src: &str, config: &Config) -> Commands {
     let mut commands: Commands = hashmap_from(&mut *UTILS.lock().unwrap());
     for line in src.lines() {
         let line_string = line.to_string();
@@ -373,10 +326,10 @@ fn commands(src: &str, config: &Config) -> Commands {
             let mut params = None;
             while let Some((i, ch)) = chars.next() {
                 match ch {
-                    '[' => {
+                    '<' => {
                         let mut temp = String::new();
                         while let Some((_, ch)) = chars.next() {
-                            if ch == ']' {
+                            if ch == '>' {
                                 break;
                             }
                             temp.push(ch);
@@ -401,8 +354,21 @@ fn commands(src: &str, config: &Config) -> Commands {
                                 }
                                 temp.push(ch);
                             }
-                            let tokens = tokenize_text(&temp, &commands);
-                            let command = Command::Macro { tokens };
+                            let command = if let Some(p) = params {
+                                Command::Macro {
+                                    tokens: Vec::new(),
+                                    params: Some(Params {
+                                        raw: temp.to_string(),
+                                        params: p,
+                                    }),
+                                }
+                            } else {
+                                let tokens = tokenize_text(&temp, &commands);
+                                Command::Macro {
+                                    params: None,
+                                    tokens,
+                                }
+                            };
                             commands.insert(name, command);
                         } else {
                             let raw_args = &trimmed_line[i + 1..];
@@ -416,9 +382,9 @@ fn commands(src: &str, config: &Config) -> Commands {
                                 };
                                 commands.insert(name, command);
                             } else {
-                                let args = parse_args(raw_args);
+                                let args = cli_args(raw_args);
                                 let mut cli = Cli::parse_from(args);
-                                overwrite_cli(&mut cli, &config);
+                                cli.config(&config);
                                 let command = Command::Command { params: None, cli };
                                 commands.insert(name, command);
                             }
@@ -444,7 +410,7 @@ fn tokenize_text(src: &str, commands: &Commands) -> Vec<Token> {
         match ch {
             '!' => {
                 tokens.push(Token::String(string_token.clone()));
-                tokens.push(command_call_token(&mut chars, &commands));
+                tokens.push(command_token(&mut chars, &commands));
                 string_token.clear();
                 continue;
             }
@@ -463,27 +429,13 @@ fn tokenize_text(src: &str, commands: &Commands) -> Vec<Token> {
     tokens
 }
 
-fn split_with_positions(str: &str, positions: HashSet<usize>) -> Vec<String> {
-    let mut chars = str.chars().enumerate();
-    let mut temp = 0;
-    let mut res = Vec::new();
-    while let Some((i, _)) = chars.next() {
-        if positions.contains(&i) {
-            res.push(str[temp..i].trim().to_string());
-            temp = i + 1;
-        }
-    }
-    res.push(str[temp..str.len()].trim().to_string());
-    res
-}
-
-fn command_call_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) -> Token {
+fn command_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) -> Token {
     let mut name = String::new();
     let mut args = None::<Vec<Vec<Token>>>;
     while let Some((_, ch)) = chars.next() {
         match ch {
             '(' => break,
-            '[' => {
+            '<' => {
                 let mut brack = 1;
                 let mut temp = String::new();
                 let mut pos = 0;
@@ -503,8 +455,8 @@ fn command_call_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
                                 string = (true, ch);
                             }
                         }
-                        '[' => brack += 1,
-                        ']' => brack -= 1,
+                        '<' => brack += 1,
+                        '>' => brack -= 1,
                         _ => (),
                     }
                     if brack == 0 {
@@ -543,7 +495,7 @@ fn command_call_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
             }
             '!' => {
                 tokens.push(Token::String(string_token.clone()));
-                tokens.push(command_call_token(chars, commands));
+                tokens.push(command_token(chars, commands));
                 string_token.clear();
                 continue;
             }
@@ -569,7 +521,7 @@ fn command_call_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Command
     Token::Command { name, tokens, args }
 }
 
-fn parse_args(string: &str) -> Vec<String> {
+fn cli_args(string: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut chars = string.chars();
     let mut is_string = false;
@@ -634,9 +586,6 @@ fn parse_args(string: &str) -> Vec<String> {
 
 pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> String {
     match command {
-        Command::Builtin { .. } => {
-            panic!()
-        }
         Command::Command { cli, .. } => (0..cli.repeat)
             .into_par_iter()
             .map(|i| {
@@ -653,6 +602,14 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                                     Command::Builtin { f, .. } => {
                                         let args = command_args(args, commands);
                                         return (f)(&args);
+                                    }
+                                    Command::Macro { .. } => {
+                                        let tokens =
+                                            tokens_from_command_args(args, command, name, commands);
+                                        Command::Macro {
+                                            params: None,
+                                            tokens,
+                                        }
                                     }
                                     _ => {
                                         let cli =
@@ -693,7 +650,8 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                 }
             })
             .collect::<String>(),
-        Command::Macro { tokens } => parse(commands, tokens, &Command::default()),
+        Command::Macro { tokens, .. } => parse(commands, tokens, &Command::default()),
+        _ => panic!(),
     }
 }
 
@@ -701,6 +659,35 @@ fn command_args(args: &Vec<Vec<Token>>, commands: &Commands) -> Vec<String> {
     args.iter()
         .map(|i| parse(commands, i, &Default::default()))
         .collect()
+}
+
+fn tokens_from_command_args(
+    args: &Vec<Vec<Token>>,
+    command: &Command,
+    name: &str,
+    commands: &Commands,
+) -> Vec<Token> {
+    if let Command::Macro {
+        params: Some(params),
+        ..
+    } = command
+    {
+        let mut raw_args = params.raw.to_owned();
+        for (i, p) in params.params.iter().enumerate() {
+            raw_args = raw_args.replace(
+                p,
+                &parse(
+                    commands,
+                    args.get(i)
+                        .expect(&format!("expected '{}' argument at command '{}'", p, name,)),
+                    &Default::default(),
+                ),
+            );
+        }
+        tokenize_text(&raw_args, commands)
+    } else {
+        panic!()
+    }
 }
 
 fn cli_from_command_args(
@@ -726,7 +713,7 @@ fn cli_from_command_args(
                 ),
             );
         }
-        let args = parse_args(&raw_args);
+        let args = cli_args(&raw_args);
         let cli = Cli::parse_from(args);
         cli
     } else {
@@ -758,14 +745,6 @@ fn gen_custom(rng: &mut ThreadRng, len: usize, set: &str) -> String {
         res.push(*set_chars.get(rng.gen_range(0..set_chars.len())).unwrap());
     }
 
-    res
-}
-
-fn format(prefix: &str, str: &str, suffix: &str) -> String {
-    let mut res = String::with_capacity(prefix.len() + str.len() + suffix.len());
-    res.push_str(prefix);
-    res.push_str(str);
-    res.push_str(suffix);
     res
 }
 
@@ -1030,10 +1009,12 @@ pub fn par_rngstr(cli: &Cli) -> String {
     }
 }
 
-fn overwrite_cli(cli: &mut Cli, config: &Config) {
-    if config.trailing_suffix {
-        cli.trailing_suffix = true;
-    }
+fn format(prefix: &str, str: &str, suffix: &str) -> String {
+    let mut res = String::with_capacity(prefix.len() + str.len() + suffix.len());
+    res.push_str(prefix);
+    res.push_str(str);
+    res.push_str(suffix);
+    res
 }
 
 pub fn copy_print(cli: &Cli, res: String) {
@@ -1043,4 +1024,58 @@ pub fn copy_print(cli: &Cli, res: String) {
     if !cli.no_copy {
         set_contents(res).expect("copying to clipboard");
     }
+}
+
+fn inside_quote(str: &str) -> String {
+    let mut string = str.trim().to_string();
+    let mut chars: Vec<_> = string.chars().collect();
+    if let Some('"' | '\'') = chars.get(0) {
+        chars.remove(0);
+        chars.pop();
+        string = chars.into_iter().collect::<String>();
+    };
+    string
+}
+
+fn format_array(slice: &[String]) -> String {
+    let mut res = slice.join(", ");
+    res.insert_str(0, "[");
+    res.push_str("]");
+    res
+}
+
+fn split_trim_by(str: &str, pat: char) -> Vec<String> {
+    str.split(pat)
+        .filter_map(|i| {
+            let t = i.trim();
+            if !t.is_empty() {
+                Some(t.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
+fn hashmap_from<K: Eq + Hash + Default, V: Default>(slice: &mut [(K, V)]) -> HashMap<K, V> {
+    let mut h = HashMap::new();
+    for i in 0..slice.len() {
+        let s = std::mem::take(&mut slice[i]);
+        h.insert(s.0, s.1);
+    }
+    h
+}
+
+fn split_with_positions(str: &str, positions: HashSet<usize>) -> Vec<String> {
+    let mut chars = str.chars().enumerate();
+    let mut temp = 0;
+    let mut res = Vec::new();
+    while let Some((i, _)) = chars.next() {
+        if positions.contains(&i) {
+            res.push(str[temp..i].trim().to_string());
+            temp = i + 1;
+        }
+    }
+    res.push(str[temp..str.len()].trim().to_string());
+    res
 }

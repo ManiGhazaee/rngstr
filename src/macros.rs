@@ -16,3 +16,10 @@ macro_rules! gen_range_to_string_vec {
         res
     }};
 }
+
+#[macro_export]
+macro_rules! unfortunate {
+    ($i:ident $j:ident $name:ident: [$ty:ty; _] = $value:expr) => {
+        $id $name: [$ty; *$value.len()] = $value;
+    }
+}

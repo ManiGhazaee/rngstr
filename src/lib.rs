@@ -1,16 +1,16 @@
-use core::panic;
 use std::{
     collections::{HashMap, HashSet},
     f32::NAN,
-    hash::Hash,
     iter::{Enumerate, Peekable},
     ops::Range,
     str::Chars,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 
+use builtins::BUILTINS;
 use clap::Parser;
 use cli_clipboard::set_contents;
+use lazy_static::lazy_static;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 use rayon::prelude::*;
 use regex::bytes::Regex;
@@ -18,123 +18,10 @@ use regex::bytes::Regex;
 mod builtins;
 mod macros;
 
-#[macro_use]
-extern crate lazy_static;
-
 lazy_static! {
-    static ref SET_CACHE: HashMap<String, String> = HashMap::new();
-    static ref UTILS: Mutex<[(String, Command); 11]> = Mutex::new([
-        (
-            "repeat".into(),
-            Command::Command {
-                params: Some(Params {
-                    raw: "--repeat count -s suffix".into(),
-                    params: vec!["count".into(), "suffix".into()],
-                }),
-                cli: Default::default(),
-            }
-        ),
-        (
-            "cmd".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["string".into()],
-                }),
-                f: builtins::cmd,
-            }
-        ),
-        (
-            "cmd_array".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["string".into(), "length".into()],
-                }),
-                f: builtins::cmd_array,
-            }
-        ),
-        (
-            "array".into(),
-            Command::Macro {
-                params: Some(Params {
-                    raw: "[!repeat<length, \", \">(!command())]".into(),
-                    params: vec!["command".into(), "length".into(),],
-                },),
-                tokens: vec![],
-            }
-        ),
-        (
-            "array_fill".into(),
-            Command::Macro {
-                params: Some(Params {
-                    raw: "[!repeat<length, \", \">(element)]".into(),
-                    params: vec!["element".into(), "length".into(),],
-                },),
-                tokens: vec![],
-            }
-        ),
-        (
-            "u32".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["start".into(), "end".into()],
-                }),
-                f: builtins::u32,
-            }
-        ),
-        (
-            "i32".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["start".into(), "end".into()],
-                }),
-                f: builtins::i32,
-            }
-        ),
-        (
-            "f32".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["start".into(), "end".into()],
-                }),
-                f: builtins::f32,
-            }
-        ),
-        (
-            "f32_array".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
-                }),
-                f: builtins::f32_array,
-            }
-        ),
-        (
-            "i32_array".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
-                }),
-                f: builtins::i32_array,
-            }
-        ),
-        (
-            "u32_array".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
-                }),
-                f: builtins::u32_array,
-            }
-        )
-    ]);
+    static ref SET_CACHE: HashMap<String, String> = Default::default();
+    static ref TOKENIZER_CACHE: RwLock<HashMap<String, Vec<Token>>> = Default::default();
+    static ref CLI_PARSER_CACHE: Mutex<HashMap<String, Cli>> = Default::default();
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -206,7 +93,7 @@ pub struct Cli {
 
 #[derive(Debug, Default, Clone)]
 pub struct Config {
-    pub trailing_suffix: bool,
+    trailing_suffix: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -260,9 +147,21 @@ impl Cli {
         }
     }
 
-    pub fn config(&mut self, config: &Config) {
+    fn with_config(&mut self, config: &Config) {
         if config.trailing_suffix {
             self.trailing_suffix = true;
+        }
+    }
+
+    pub fn from_raw_args(raw: &str) -> Self {
+        let mut lock = CLI_PARSER_CACHE.lock().unwrap();
+        if let Some(cli) = lock.get(raw) {
+            return cli.clone();
+        } else {
+            let args = cli_args(raw);
+            let cli = Cli::parse_from(args);
+            lock.insert(raw.to_string(), cli.clone());
+            return cli;
         }
     }
 }
@@ -286,12 +185,15 @@ impl Default for Cli {
     }
 }
 
-pub fn tokenize(src: String, config: Config) -> (Commands, Vec<Token>) {
-    let commands = command_decs(&src, &config);
-    let src = &src[first_text_byte(&src)..];
-    let tokens = tokenize_text(src, &commands);
+pub fn commands(src: &str, config: &Config) -> Commands {
+    command_decs(&src, &config)
+}
 
-    (commands, tokens)
+pub fn tokenize(src: String) -> Vec<Token> {
+    let src = &src[first_text_byte(&src)..];
+    let tokens = tokenize_text(src);
+
+    tokens
 }
 
 fn first_text_byte(src: &str) -> usize {
@@ -315,7 +217,7 @@ fn first_text_byte(src: &str) -> usize {
 }
 
 fn command_decs(src: &str, config: &Config) -> Commands {
-    let mut commands: Commands = hashmap_from(&mut *UTILS.lock().unwrap());
+    let mut commands = HashMap::from(std::mem::take(&mut *BUILTINS.lock().unwrap()));
     for line in src.lines() {
         let line_string = line.to_string();
         let mut trimmed_line = line_string.trim_start();
@@ -363,7 +265,7 @@ fn command_decs(src: &str, config: &Config) -> Commands {
                                     }),
                                 }
                             } else {
-                                let tokens = tokenize_text(&temp, &commands);
+                                let tokens = tokenize_text(&temp);
                                 Command::Macro {
                                     params: None,
                                     tokens,
@@ -382,9 +284,8 @@ fn command_decs(src: &str, config: &Config) -> Commands {
                                 };
                                 commands.insert(name, command);
                             } else {
-                                let args = cli_args(raw_args);
-                                let mut cli = Cli::parse_from(args);
-                                cli.config(&config);
+                                let mut cli = Cli::from_raw_args(raw_args);
+                                cli.with_config(&config);
                                 let command = Command::Command { params: None, cli };
                                 commands.insert(name, command);
                             }
@@ -399,10 +300,14 @@ fn command_decs(src: &str, config: &Config) -> Commands {
             break;
         }
     }
+
     commands
 }
 
-fn tokenize_text(src: &str, commands: &Commands) -> Vec<Token> {
+fn tokenize_text(src: &str) -> Vec<Token> {
+    if let Some(tokens) = TOKENIZER_CACHE.read().unwrap().get(src) {
+        return tokens.clone();
+    }
     let mut chars: Peekable<Enumerate<Chars>> = src.chars().enumerate().peekable();
     let mut tokens = Vec::new();
     let mut string_token = String::new();
@@ -410,7 +315,7 @@ fn tokenize_text(src: &str, commands: &Commands) -> Vec<Token> {
         match ch {
             '!' => {
                 tokens.push(Token::String(string_token.clone()));
-                tokens.push(command_token(&mut chars, &commands));
+                tokens.push(command_token(&mut chars));
                 string_token.clear();
                 continue;
             }
@@ -425,11 +330,15 @@ fn tokenize_text(src: &str, commands: &Commands) -> Vec<Token> {
         string_token.push(ch);
     }
     tokens.push(Token::String(string_token.clone()));
+    TOKENIZER_CACHE
+        .write()
+        .unwrap()
+        .insert(src.to_string(), tokens.clone());
 
     tokens
 }
 
-fn command_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) -> Token {
+fn command_token(chars: &mut Peekable<Enumerate<Chars>>) -> Token {
     let mut name = String::new();
     let mut args = None::<Vec<Vec<Token>>>;
     while let Some((_, ch)) = chars.next() {
@@ -469,7 +378,7 @@ fn command_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) ->
                 args = Some(
                     _args
                         .into_iter()
-                        .map(|i| tokenize_text(&i, commands))
+                        .map(|i| tokenize_text(&i))
                         .collect::<Vec<_>>(),
                 );
                 continue;
@@ -495,7 +404,7 @@ fn command_token(chars: &mut Peekable<Enumerate<Chars>>, commands: &Commands) ->
             }
             '!' => {
                 tokens.push(Token::String(string_token.clone()));
-                tokens.push(command_token(chars, commands));
+                tokens.push(command_token(chars));
                 string_token.clear();
                 continue;
             }
@@ -584,7 +493,7 @@ fn cli_args(string: &str) -> Vec<String> {
     args
 }
 
-pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> String {
+pub fn parse(tokens: &Vec<Token>, command: &Command, commands: &Commands) -> String {
     match command {
         Command::Command { cli, .. } => (0..cli.repeat)
             .into_par_iter()
@@ -620,7 +529,7 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                             } else {
                                 command.to_owned()
                             };
-                            parse(commands, tokens, &command)
+                            parse(tokens, &command, commands)
                         }
                         Token::String(string) => string.to_string(),
                         Token::Target => {
@@ -650,14 +559,14 @@ pub fn parse(commands: &Commands, tokens: &Vec<Token>, command: &Command) -> Str
                 }
             })
             .collect::<String>(),
-        Command::Macro { tokens, .. } => parse(commands, tokens, &Command::default()),
-        _ => panic!(),
+        Command::Macro { tokens, .. } => parse(tokens, &Command::default(), commands),
+        _ => unreachable!(),
     }
 }
 
 fn command_args(args: &Vec<Vec<Token>>, commands: &Commands) -> Vec<String> {
     args.iter()
-        .map(|i| parse(commands, i, &Default::default()))
+        .map(|i| parse(i, &Default::default(), commands))
         .collect()
 }
 
@@ -677,16 +586,16 @@ fn tokens_from_command_args(
             raw_args = raw_args.replace(
                 p,
                 &parse(
-                    commands,
                     args.get(i)
                         .expect(&format!("expected '{}' argument at command '{}'", p, name,)),
                     &Default::default(),
+                    commands,
                 ),
             );
         }
-        tokenize_text(&raw_args, commands)
+        tokenize_text(&raw_args)
     } else {
-        panic!()
+        unreachable!()
     }
 }
 
@@ -706,18 +615,16 @@ fn cli_from_command_args(
             raw_args = raw_args.replace(
                 p,
                 &parse(
-                    commands,
                     args.get(i)
                         .expect(&format!("expected '{}' argument at command '{}'", p, name,)),
                     &Default::default(),
+                    commands,
                 ),
             );
         }
-        let args = cli_args(&raw_args);
-        let cli = Cli::parse_from(args);
-        cli
+        Cli::from_raw_args(&raw_args)
     } else {
-        panic!()
+        unreachable!()
     }
 }
 
@@ -768,7 +675,7 @@ fn parse_range(str: &str) -> Range<usize> {
     Range { start, end }
 }
 
-pub fn rngstr(cli: &Cli) -> String {
+fn rngstr(cli: &Cli) -> String {
     let mut rng = thread_rng();
     match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
         (Some(set), ..) => (0..cli.repeat)
@@ -1055,15 +962,6 @@ fn split_trim_by(str: &str, pat: char) -> Vec<String> {
             }
         })
         .collect::<Vec<_>>()
-}
-
-fn hashmap_from<K: Eq + Hash + Default, V: Default>(slice: &mut [(K, V)]) -> HashMap<K, V> {
-    let mut h = HashMap::new();
-    for i in 0..slice.len() {
-        let s = std::mem::take(&mut slice[i]);
-        h.insert(s.0, s.1);
-    }
-    h
 }
 
 fn split_with_positions(str: &str, positions: HashSet<usize>) -> Vec<String> {

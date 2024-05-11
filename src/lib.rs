@@ -39,7 +39,7 @@ pub struct Cli {
     #[arg(
         long,
         short,
-        conflicts_with_all(&["password", "regex"])
+        conflicts_with_all(&["password", "regex", "group"])
     )]
     pub custom: Option<String>,
 
@@ -47,9 +47,17 @@ pub struct Cli {
     /// character set)
     #[arg(
         long,
-        conflicts_with_all(&["password", "custom"]),
+        conflicts_with_all(&["password", "custom", "group"]),
     )]
     pub regex: Option<String>,
+
+    #[arg(
+        long,
+        short,
+        num_args(1..),
+        conflicts_with_all(&["password", "custom", "regex", "length"])
+    )]
+    pub group: Option<Vec<String>>,
 
     /// Specify a range between two unsigned integer with `start..end` syntax (`Range<usize>` start: inclusive, end: exclusive, start < end), (e.g. 24..36)
     #[arg(
@@ -172,6 +180,7 @@ impl Default for Cli {
             length: 0,
             custom: None,
             regex: None,
+            group: None,
             range: None,
             prefix: String::new(),
             suffix: String::new(),
@@ -655,6 +664,10 @@ fn gen_custom(rng: &mut ThreadRng, len: usize, set: &str) -> String {
     res
 }
 
+fn gen_group<'a>(rng: &mut ThreadRng, group: &'a [String]) -> &'a str {
+    &group[rng.gen_range(0..group.len())]
+}
+
 fn parse_range(str: &str) -> Range<usize> {
     let vec = str
         .trim()
@@ -677,7 +690,13 @@ fn parse_range(str: &str) -> Range<usize> {
 
 fn rngstr(cli: &Cli) -> String {
     let mut rng = thread_rng();
-    match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
+    match (
+        &cli.custom,
+        &cli.regex,
+        &cli.group,
+        &cli.range,
+        &cli.password,
+    ) {
         (Some(set), ..) => (0..cli.repeat)
             .map(|_| {
                 format(
@@ -709,6 +728,9 @@ fn rngstr(cli: &Cli) -> String {
                 })
                 .collect::<String>()
         }
+        (_, _, Some(group), ..) => (0..cli.repeat)
+            .map(|_| format(&cli.prefix, &gen_group(&mut rng, &group), &cli.suffix))
+            .collect::<String>(),
         (.., Some(range), _) => {
             let range = parse_range(range);
             (0..cli.repeat)
@@ -740,7 +762,13 @@ fn rngstr(cli: &Cli) -> String {
 pub fn par_rngstr(cli: &Cli) -> String {
     if !cli.trailing_suffix {
         let take = cli.repeat.saturating_sub(1);
-        match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
+        match (
+            &cli.custom,
+            &cli.regex,
+            &cli.group,
+            &cli.range,
+            &cli.password,
+        ) {
             (Some(set), ..) => {
                 let mut res = (0..cli.repeat)
                     .into_par_iter()
@@ -786,6 +814,23 @@ pub fn par_rngstr(cli: &Cli) -> String {
                 res.push_str(&format(
                     &cli.prefix,
                     &gen_custom(&mut thread_rng(), cli.length, &set),
+                    "",
+                ));
+                res
+            }
+            (_, _, Some(group), ..) => {
+                let mut res = (0..cli.repeat)
+                    .into_par_iter()
+                    .take(take)
+                    .map_init(
+                        || thread_rng(),
+                        |rng, _| format(&cli.prefix, &gen_group(rng, &group), &cli.suffix),
+                    )
+                    .collect::<String>();
+
+                res.push_str(&format(
+                    &cli.prefix,
+                    &gen_group(&mut thread_rng(), &group),
                     "",
                 ));
                 res
@@ -852,7 +897,13 @@ pub fn par_rngstr(cli: &Cli) -> String {
             }
         }
     } else {
-        match (&cli.custom, &cli.regex, &cli.range, &cli.password) {
+        match (
+            &cli.custom,
+            &cli.regex,
+            &cli.group,
+            &cli.range,
+            &cli.password,
+        ) {
             (Some(set), ..) => (0..cli.repeat)
                 .into_par_iter()
                 .map_init(
@@ -882,6 +933,13 @@ pub fn par_rngstr(cli: &Cli) -> String {
                     )
                     .collect::<String>()
             }
+            (_, _, Some(group), ..) => (0..cli.repeat)
+                .into_par_iter()
+                .map_init(
+                    || thread_rng(),
+                    |rng, _| format(&cli.prefix, &gen_group(rng, &group), &cli.suffix),
+                )
+                .collect::<String>(),
             (.., Some(range), _) => {
                 let range = parse_range(range);
                 (0..cli.repeat)
@@ -942,13 +1000,6 @@ fn inside_quote(str: &str) -> String {
         string = chars.into_iter().collect::<String>();
     };
     string
-}
-
-fn format_array(slice: &[String]) -> String {
-    let mut res = slice.join(", ");
-    res.insert_str(0, "[");
-    res.push_str("]");
-    res
 }
 
 fn split_trim_by(str: &str, pat: char) -> Vec<String> {

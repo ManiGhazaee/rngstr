@@ -1,7 +1,7 @@
 use super::*;
 
 lazy_static! {
-    pub static ref BUILTINS: Mutex<[(String, Command); 11]> = Mutex::new([
+    pub static ref BUILTINS: Mutex<[(String, Command); 8]> = Mutex::new([
         (
             "repeat".into(),
             Command::Command {
@@ -23,13 +23,13 @@ lazy_static! {
             }
         ),
         (
-            "cmd_array".into(),
+            "group".into(),
             Command::Builtin {
                 params: Some(Params {
                     raw: "".into(),
-                    params: vec!["string".into(), "length".into()],
+                    params: vec!["items".into()],
                 }),
-                f: builtins::cmd_array,
+                f: builtins::group,
             }
         ),
         (
@@ -82,36 +82,6 @@ lazy_static! {
                 f: builtins::f32,
             }
         ),
-        (
-            "f32_array".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
-                }),
-                f: builtins::f32_array,
-            }
-        ),
-        (
-            "i32_array".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
-                }),
-                f: builtins::i32_array,
-            }
-        ),
-        (
-            "u32_array".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["range_start".into(), "range_end".into(), "length".into()],
-                }),
-                f: builtins::u32_array,
-            }
-        )
     ]);
 }
 
@@ -121,15 +91,9 @@ pub fn cmd(args: &Vec<String>) -> String {
     par_rngstr(&cli)
 }
 
-pub fn cmd_array(args: &Vec<String>) -> String {
-    let string = inside_quote(&args[0]);
-    let len: usize = args[1].parse().unwrap();
-    let cli = Cli::from_raw_args(&string);
-    let mut res = Vec::new();
-    for _ in 0..len {
-        res.push(par_rngstr(&cli));
-    }
-    format_array(&res)
+pub fn group(args: &Vec<String>) -> String {
+    let cli = Cli::from_raw_args(&format!("--group {}", &args.join(" ")));
+    par_rngstr(&cli)
 }
 
 pub fn f32(args: &Vec<String>) -> String {
@@ -154,31 +118,4 @@ pub fn u32(args: &Vec<String>) -> String {
         1 => u32
     );
     thread_rng().gen_range(start..end).to_string()
-}
-
-pub fn f32_array(args: &Vec<String>) -> String {
-    let (start, end, len) = parse_args!(args,
-        0 => f32,
-        1 => f32,
-        2 => usize
-    );
-    format_array(&gen_range_to_string_vec!(start..end, len))
-}
-
-pub fn i32_array(args: &Vec<String>) -> String {
-    let (start, end, len) = parse_args!(args,
-        0 => i32,
-        1 => i32,
-        2 => usize
-    );
-    format_array(&gen_range_to_string_vec!(start..end, len))
-}
-
-pub fn u32_array(args: &Vec<String>) -> String {
-    let (start, end, len) = parse_args!(args,
-        0 => u32,
-        1 => u32,
-        2 => usize
-    );
-    format_array(&gen_range_to_string_vec!(start..end, len))
 }

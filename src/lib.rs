@@ -22,6 +22,7 @@ lazy_static! {
     static ref SET_CACHE: HashMap<String, String> = Default::default();
     static ref TOKENIZER_CACHE: RwLock<HashMap<String, Vec<Token>>> = Default::default();
     static ref CLI_PARSER_CACHE: Mutex<HashMap<String, Cli>> = Default::default();
+    static ref IDS: Mutex<HashMap<String, usize>> = Default::default();
 }
 
 #[derive(Parser, Debug, Clone)]

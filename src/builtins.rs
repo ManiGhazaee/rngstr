@@ -1,7 +1,7 @@
 use super::*;
 
 lazy_static! {
-    pub static ref BUILTINS: Mutex<[(String, Command); 8]> = Mutex::new([
+    pub static ref BUILTINS: Mutex<[(String, Command); 9]> = Mutex::new([
         (
             "repeat".into(),
             Command::Command {
@@ -20,6 +20,16 @@ lazy_static! {
                     params: vec!["string".into()],
                 }),
                 f: builtins::cmd,
+            }
+        ),
+        (
+            "id".into(),
+            Command::Builtin {
+                params: Some(Params {
+                    raw: "".into(),
+                    params: vec!["tag".into()],
+                }),
+                f: builtins::id,
             }
         ),
         (
@@ -89,6 +99,19 @@ pub fn cmd(args: &Vec<String>) -> String {
     let string = inside_quote(&args[0]);
     let cli = Cli::from_raw_args(&string);
     par_rngstr(&cli)
+}
+
+pub fn id(args: &Vec<String>) -> String {
+    let tag = parse_args!(args, 0 => String);
+    let mut lock = IDS.lock().unwrap();
+    if let Some(t) = lock.get_mut(&tag) {
+        let ret = *t;
+        *t += 1;
+        ret.to_string()
+    } else {
+        lock.insert(tag, 1);
+        0.to_string()
+    }
 }
 
 pub fn group(args: &Vec<String>) -> String {

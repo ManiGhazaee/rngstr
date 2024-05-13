@@ -128,7 +128,7 @@ pub enum Command {
     },
     Builtin {
         params: Option<Params>,
-        f: fn(&Vec<String>) -> String,
+        f: fn(&Vec<String>) -> Result<String, String>,
     },
 }
 
@@ -339,7 +339,9 @@ fn tokenize_text(src: &str) -> Vec<Token> {
         }
         string_token.push(ch);
     }
-    tokens.push(Token::String(string_token.clone()));
+    if !string_token.is_empty() {
+        tokens.push(Token::String(string_token.clone()));
+    }
     TOKENIZER_CACHE
         .write()
         .unwrap()
@@ -503,7 +505,11 @@ fn cli_args(string: &str) -> Vec<String> {
     args
 }
 
-pub fn parse(tokens: &Vec<Token>, command: &Command, commands: &Commands) -> String {
+pub fn parse(
+    tokens: &Vec<Token>,
+    command: &Command,
+    commands: &Commands,
+) -> Result<String, String> {
     match command {
         Command::Command { cli, .. } => (0..cli.repeat)
             .into_par_iter()
@@ -513,18 +519,21 @@ pub fn parse(tokens: &Vec<Token>, command: &Command, commands: &Commands) -> Str
                     .into_par_iter()
                     .map(|token| match token {
                         Token::Command { name, tokens, args } => {
-                            let command = commands
-                                .get(name)
-                                .expect(&format!("command '{}' not found", name));
+                            let command = if let Some(command) = commands.get(name) {
+                                command
+                            } else {
+                                return Err(format!("command '{}' not found", name));
+                            };
                             let command = if let Some(args) = args {
                                 match command {
                                     Command::Builtin { f, .. } => {
-                                        let args = command_args(args, commands);
+                                        let args = command_args(args, commands)?;
                                         return (f)(&args);
                                     }
                                     Command::Macro { .. } => {
-                                        let tokens =
-                                            tokens_from_command_args(args, command, name, commands);
+                                        let tokens = tokens_from_command_args(
+                                            args, command, name, commands,
+                                        )?;
                                         Command::Macro {
                                             params: None,
                                             tokens,
@@ -532,20 +541,25 @@ pub fn parse(tokens: &Vec<Token>, command: &Command, commands: &Commands) -> Str
                                     }
                                     _ => {
                                         let cli =
-                                            cli_from_command_args(args, command, name, commands);
+                                            cli_from_command_args(args, command, name, commands)?;
                                         Command::Command { params: None, cli }
                                     }
                                 }
                             } else {
-                                command.to_owned()
+                                match command {
+                                    Command::Builtin { f, .. } => {
+                                        return (f)(&vec![]);
+                                    }
+                                    _ => command.to_owned(),
+                                }
                             };
                             parse(tokens, &command, commands)
                         }
-                        Token::String(string) => string.to_string(),
+                        Token::String(string) => Ok(string.to_string()),
                         Token::Target => {
                             let mut lock = gen.lock().unwrap();
                             if let Some(gen) = &*lock {
-                                gen.to_string()
+                                Ok(gen.to_string())
                             } else {
                                 let str = rngstr(&Cli {
                                     repeat: 1,
@@ -554,30 +568,30 @@ pub fn parse(tokens: &Vec<Token>, command: &Command, commands: &Commands) -> Str
                                     ..cli.clone()
                                 });
                                 *lock = Some(str.clone());
-                                str
+                                Ok(str)
                             }
                         }
                     })
-                    .collect::<String>();
+                    .collect::<Result<String, _>>()?;
 
                 if (i == cli.repeat - 1) && !cli.trailing_suffix {
                     let ret = format(&cli.prefix, &temp, "");
-                    ret
+                    Ok(ret)
                 } else {
                     let ret = format(&cli.prefix, &temp, &cli.suffix);
-                    ret
+                    Ok(ret)
                 }
             })
-            .collect::<String>(),
+            .collect::<Result<String, _>>(),
         Command::Macro { tokens, .. } => parse(tokens, &Command::default(), commands),
         _ => unreachable!(),
     }
 }
 
-fn command_args(args: &Vec<Vec<Token>>, commands: &Commands) -> Vec<String> {
+fn command_args(args: &Vec<Vec<Token>>, commands: &Commands) -> Result<Vec<String>, String> {
     args.iter()
         .map(|i| parse(i, &Default::default(), commands))
-        .collect()
+        .collect::<Result<_, _>>()
 }
 
 fn tokens_from_command_args(
@@ -585,7 +599,7 @@ fn tokens_from_command_args(
     command: &Command,
     name: &str,
     commands: &Commands,
-) -> Vec<Token> {
+) -> Result<Vec<Token>, String> {
     if let Command::Macro {
         params: Some(params),
         ..
@@ -600,10 +614,10 @@ fn tokens_from_command_args(
                         .expect(&format!("expected '{}' argument at command '{}'", p, name,)),
                     &Default::default(),
                     commands,
-                ),
+                )?,
             );
         }
-        tokenize_text(&raw_args)
+        Ok(tokenize_text(&raw_args))
     } else {
         unreachable!()
     }
@@ -614,7 +628,7 @@ fn cli_from_command_args(
     command: &Command,
     name: &str,
     commands: &Commands,
-) -> Cli {
+) -> Result<Cli, String> {
     if let Command::Command {
         params: Some(params),
         ..
@@ -629,10 +643,10 @@ fn cli_from_command_args(
                         .expect(&format!("expected '{}' argument at command '{}'", p, name,)),
                     &Default::default(),
                     commands,
-                ),
+                )?,
             );
         }
-        Cli::from_raw_args(&raw_args)
+        Ok(Cli::from_raw_args(&raw_args))
     } else {
         unreachable!()
     }

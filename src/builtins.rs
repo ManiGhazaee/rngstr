@@ -1,144 +1,112 @@
 use super::*;
 
 lazy_static! {
-    pub static ref BUILTINS: Mutex<[(String, Command); 9]> = Mutex::new([
-        (
-            "repeat".into(),
-            Command::Command {
-                params: Some(Params {
-                    raw: "--repeat count -s suffix".into(),
-                    params: vec!["count".into(), "suffix".into()],
-                }),
-                cli: Default::default(),
-            }
-        ),
-        (
-            "cmd".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["string".into()],
-                }),
-                f: builtins::cmd,
-            }
-        ),
-        (
-            "id".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["tag".into()],
-                }),
-                f: builtins::id,
-            }
-        ),
-        (
-            "group".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["items".into()],
-                }),
-                f: builtins::group,
-            }
-        ),
-        (
-            "array".into(),
-            Command::Macro {
-                params: Some(Params {
-                    raw: "[!repeat<length, \", \">(!command())]".into(),
-                    params: vec!["command".into(), "length".into(),],
-                },),
-                tokens: vec![],
-            }
-        ),
-        (
-            "array_fill".into(),
-            Command::Macro {
-                params: Some(Params {
-                    raw: "[!repeat<length, \", \">(element)]".into(),
-                    params: vec!["element".into(), "length".into(),],
-                },),
-                tokens: vec![],
-            }
-        ),
-        (
-            "u32".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["start".into(), "end".into()],
-                }),
-                f: builtins::u32,
-            }
-        ),
-        (
-            "i32".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["start".into(), "end".into()],
-                }),
-                f: builtins::i32,
-            }
-        ),
-        (
-            "f32".into(),
-            Command::Builtin {
-                params: Some(Params {
-                    raw: "".into(),
-                    params: vec!["start".into(), "end".into()],
-                }),
-                f: builtins::f32,
-            }
-        ),
-    ]);
+    pub static ref BUILTINS: Mutex<[(String, Command); 20]> = {
+        let mut x = [
+            (
+                "repeat".into(),
+                Command::Command {
+                    params: Some(Params {
+                        raw: "--repeat count -s suffix".into(),
+                        params: vec!["count".into(), "suffix".into()],
+                    }),
+                    cli: Default::default(),
+                },
+            ),
+            (
+                "cmd".into(),
+                Command::Builtin {
+                    params: Some(Params {
+                        raw: "".into(),
+                        params: vec!["string".into()],
+                    }),
+                    f: builtins::cmd,
+                },
+            ),
+            (
+                "id".into(),
+                Command::Builtin {
+                    params: Some(Params {
+                        raw: "".into(),
+                        params: vec!["tag".into()],
+                    }),
+                    f: builtins::id,
+                },
+            ),
+            (
+                "group".into(),
+                Command::Builtin {
+                    params: Some(Params {
+                        raw: "".into(),
+                        params: vec!["items".into()],
+                    }),
+                    f: builtins::group,
+                },
+            ),
+            (
+                "array".into(),
+                Command::Macro {
+                    params: Some(Params {
+                        raw: "[!repeat<length, \", \">(!command())]".into(),
+                        params: vec!["command".into(), "length".into()],
+                    }),
+                    tokens: vec![],
+                },
+            ),
+            (
+                "array_fill".into(),
+                Command::Macro {
+                    params: Some(Params {
+                        raw: "[!repeat<length, \", \">(element)]".into(),
+                        params: vec!["element".into(), "length".into()],
+                    }),
+                    tokens: vec![],
+                },
+            ),
+        ];
+        let mut y = builtin_types! { u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 f32 f64 usize isize };
+        let x = concat(&mut x, &mut y);
+
+        Mutex::new(x)
+    };
 }
 
-pub fn cmd(args: &Vec<String>) -> String {
+pub fn cmd(args: &Vec<String>) -> Result<String, String> {
     let string = inside_quote(&args[0]);
     let cli = Cli::from_raw_args(&string);
-    par_rngstr(&cli)
+    Ok(par_rngstr(&cli))
 }
 
-pub fn id(args: &Vec<String>) -> String {
-    let tag = parse_args!(args, 0 => String);
+pub fn id(args: &Vec<String>) -> Result<String, String> {
+    let tag = parse_args!(id, args, 0 => String);
     let mut lock = IDS.lock().unwrap();
     if let Some(t) = lock.get_mut(&tag) {
         let ret = *t;
         *t += 1;
-        ret.to_string()
+        Ok(ret.to_string())
     } else {
         lock.insert(tag, 1);
-        0.to_string()
+        Ok(0.to_string())
     }
 }
 
-pub fn group(args: &Vec<String>) -> String {
+pub fn group(args: &Vec<String>) -> Result<String, String> {
     let cli = Cli::from_raw_args(&format!("--group {}", &args.join(" ")));
-    par_rngstr(&cli)
+    Ok(par_rngstr(&cli))
 }
 
-pub fn f32(args: &Vec<String>) -> String {
-    let (start, end) = parse_args!(args,
-        0 => f32,
-        1 => f32
-    );
-    thread_rng().gen_range(start..end).to_string()
+fn concat<T: Default, const A: usize, const B: usize, const C: usize>(
+    a: &mut [T; A],
+    b: &mut [T; B],
+) -> [T; C] {
+    assert_eq!(A + B, C, "C len should be {}", A + B);
+    core::array::from_fn(|i| {
+        if i < A {
+            std::mem::take(&mut a[i])
+        } else {
+            std::mem::take(&mut b[i - A])
+        }
+    })
 }
 
-pub fn i32(args: &Vec<String>) -> String {
-    let (start, end) = parse_args!(args,
-        0 => i32,
-        1 => i32
-    );
-    thread_rng().gen_range(start..end).to_string()
-}
-
-pub fn u32(args: &Vec<String>) -> String {
-    let (start, end) = parse_args!(args,
-        0 => u32,
-        1 => u32
-    );
-    thread_rng().gen_range(start..end).to_string()
-}
+fn_types! { u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 f32 f64 usize isize }

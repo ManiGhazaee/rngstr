@@ -2,6 +2,20 @@
 
 A cli tool for generating random strings of characters with customization options and a small domain specific language.
 
+## Table of Contents
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Options](#options)
+  - [Defaults](#defaults)
+- [Examples](#examples)
+- [DSL Usage](#dsl-usage)
+  - [Command/Macro Declaration](#commandmacro-declaration)
+    - [Command](#command)
+    - [Macro](#macro)
+  - [Command/Macro Call](#commandmacro-call)
+    - [Built-ins](#built-ins)
+- [DSL Examples](#dsl-examples)
+
 ## Installation
 
 ```bash 
@@ -22,6 +36,9 @@ rngstr [OPTIONS]
 
 - `--regex <REGEX>`:
           Specify a regular expression pattern to be used to generate the character set (e.g. `[0-9A-F]` will generate `0123456789ABCDEF` character set)
+
+- `-g, --group <GROUP>...`:
+          Specify a group of strings (e.g. "foo" "bar" "baz" will generate "bar")
 
 - `-p, --prefix <PREFIX>`:
           Specify a string to be prepended to the generated string
@@ -94,21 +111,58 @@ rngstr -c 0001 -l 8 -p "0b" -s " " -r 3
 
 ## DSL Usage
 
-### Command declaration
+### Command/Macro Declaration
 
+#### Command
+
+basic:
 ```
 !<name>: [OPTIONS]
 ```
+e.g.
+```
+!foo: --regex [0-9] -l 8
+```
 
-- `!<name>`: This is the name of the command, which can be used to reference and call it later.
-- `[OPTIONS]`: These are the options that can be specified for the command, following the same syntax as the command-line options for the rngstr tool.
+with parameters:
+```
+!<name><parameters...>: [OPTIONS]
+```
+e.g.
+```
+!foo<start, end>: --range start..end
+```
 
-### Command call
+#### Macro
 
-After the first non-command line (a trimmed line not starting with `!`), you can call the declared commands using the following syntax:
+basic:
+```
+!<name>:(<text>) 
+```
+e.g.
+```
+!foo:(!bar())
+```
+
+with parameters:
+```
+!<name><parameters...>:(<text>)
+```
+e.g.
+```
+!foo<x, y, z>:(!bar<z>() !baz<x, y>()) 
+```
+
+### Command/Macro Call
+
+After the first non-declaration line (a trimmed line not starting with `!`), you can call the declared command/macros using the following syntax:
 
 ```
 !<name>()
+```
+e.g.
+```
+!foo()
 ```
 
 or
@@ -116,14 +170,153 @@ or
 ```
 !<name>($)
 ```
+e.g.
+```
+!foo($)
+```
+
+or with arguments seperated by `,`:
+
+```
+!<name><arguments...>()
+```
+e.g.
+```
+!foo<x, y, z>()
+```
 
 where `$` is a placeholder for the generated string.
 
-You can also use multiple placeholders within a command call, where each `$` will generate the same string.
+You can also use multiple placeholders within a call, where each `$` will generate the same string.
 
 ```
 !<name>($ $)
 ```
+e.g.
+```
+!foo: -c 012 -l 4 
+-
+!foo($ $ $ $)
+```
+output:
+```
+-
+2211 2211 2211 2211
+```
+
+if we call the sub string after first `:` in command/macro declaration command/marco body then:
+
+because each occurrence of parameters inside command/macro body is being replaced by parsed arguments in command/macro call it is possible to pass the name of a command/macro as an argument and call it inside the command/macro body:
+
+```
+!array<command, length>:([!repeat<length, ", ">(!command())])
+```
+e.g.
+```
+!array<command, length>:([!repeat<length, ", ">(!command())])
+!foo: --regex [a-z0-9] -l 8
+!foo_str:("!foo()")
+
+{
+    "array": !array<foo_str, 4>()
+}
+```
+output:
+```
+{
+    "array": ["2r4xtqv0", "t9na5pn0", "p1nbqvra", "c6hhww19"]
+}
+```
+or:
+```
+{
+    "array": !array<array<array<foo_str, 2>, 2>, 2>()
+}
+```
+output:
+```
+{
+    "array": [[["mw4kghh2", "qk2htxp2"], ["4s7g0z9n", "a1cszc89"]], [["xlcyhv4x", "ds4b351r"], ["pylnsvuu", "kny0h3a3"]]]
+}
+```
+
+#### Built-ins
+
+These command/macros are usable by calling with their name and overwritable by declaraing another command/macro with their name.
+
+`!cmd<string>`
+e.g.
+```
+!cmd<"--group foo bar baz">()
+```
+output:
+```
+foo
+```
+
+---
+
+`!repeat<count, suffix>`
+e.g.
+```
+!repeat<4, ", ">(!cmd<"--range 0..100">())
+```
+output: 
+```
+23, 67, 4, 91
+```
+
+---
+
+`!array<command, length>`: macro `[!repeat<length, ", ">(!command())]`
+
+---
+
+`!array_fill<element, length>`: macro `[!repeat<length, ", ">(element)]`
+
+---
+
+`!id<tag>`: adds an entry in a hashmap with tag as a key and 0 as value and increments it on each call (because of parallel parsing it doesn't generate the numbers in order)
+e.g.
+```
+!array<id<a>, 10>()
+!array<id<b>, 10>()
+!array<id<a>, 10>()
+```
+output:
+```
+[10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+```
+
+---
+
+`!group<items...>`: a builtin function that takes items seperated by `,` and randomly returns one of the items.
+e.g.
+```
+!group<foo, bar, baz>()
+!group<foo, bar, baz>()
+```
+output:
+```
+foo
+baz
+```
+
+---
+
+All rust number types:
+```
+[!u8<0, 10>(), !u16<0, 10>(), !u32<0, 10>(), !u64<0, 10>(), !u128<0, 10>(), !i8<0, 10>(), !i16<0, 10>(), !i32<0, 10>(), !i64<0, 10>(), !i128<0, 10>(), !f32<0, 10>(), !f64<0, 10>(), !usize<0, 10>(), !isize<0, 10>(), !id<0>()]
+[!u8(), !u16(), !u32(), !u64(), !u128(), !i8(), !i16(), !i32(), !i64(), !i128(), !f32(), !f64(), !usize(), !isize()]
+```
+```
+[3, 7, 4, 8, 9, 4, 7, 3, 1, 4, 6.409465, 1.9037502953455854, 3, 5, 0]
+[169, 8026, 3981710656, 15859526283082379939, 294250989955636718152642071911969640664, 114, -11975, 862154430, -650703279019604957, 104795060125221781861534722358106096176, 0.46059388, 0.8589771759897691, 13709073818113593800, 5359762487833681572]
+```
+
+
 
 ## DSL Examples
 
@@ -172,6 +365,101 @@ bar.json
         "_IVG57ISE_": [17, 37, 9, 43]
     }
 }
+```
+
+---
+
+foo.txt
+```
+!foo_group:(foo, bar, baz)
+!dq<command>:("!command()")
+
+{
+    "group": !array<dq<group<!foo_group()>>, 5>()
+}
+```
+bar.json
+```
+{
+    "group": ["foo", "baz", "bar", "foo", "foo"]
+}
+```
+
+---
+
+```bash
+rngstr --dsl foo.txt bar.ron
+```
+foo.txt
+```
+!str:("!cmd<--regex [a-z] -l !usize<3, 9>()>()")
+!rgba:(Rgba(!repeat<4, ", ">(!u8())))
+!ida:("a!id<a>()")
+!bool:(!group<true, false>())
+
+( 
+    foo: {
+        !repeat<5, ",\n\t\t">(!str(): (
+            x: !f32(),
+        ))
+    },
+    bar: [
+        !repeat<5, ",\n\t\t">((
+            t: !rgba(),
+            u: !ida(),
+            v: !bool(),
+        ))
+    ],
+)
+```
+bar.ron
+```
+( 
+    foo: {
+        "dxpln": (
+            x: 0.7885895,
+        ),
+		"yaqdg": (
+            x: 0.48093498,
+        ),
+		"hungukuf": (
+            x: 0.9161161,
+        ),
+		"qtfnkeve": (
+            x: 0.9836798,
+        ),
+		"dqedis": (
+            x: 0.42920595,
+        )
+    },
+    bar: [
+        (
+            t: Rgba(217, 101, 149, 83),
+            u: "a0",
+            v: true,
+        ),
+		(
+            t: Rgba(209, 48, 76, 67),
+            u: "a1",
+            v: true,
+        ),
+		(
+            t: Rgba(62, 167, 240, 81),
+            u: "a2",
+            v: false,
+        ),
+		(
+            t: Rgba(251, 139, 57, 219),
+            u: "a3",
+            v: false,
+        ),
+		(
+            t: Rgba(146, 106, 246, 52),
+            u: "a4",
+            v: false,
+        )
+    ],
+)
 ```
 
 ---
@@ -232,3 +520,4 @@ bar.txt
 6: 0002
 7: 0112 1220 2022 0201
 ```
+

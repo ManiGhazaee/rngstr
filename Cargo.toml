@@ -7,7 +7,7 @@ authors = ["ManiGhazaee <hosseinghazaee1@gmail.com>"]
 description = "A cli tool for generating random strings of characters with customization options and a small domain specific language"
 readme = "README.md"
 license = "MIT"
-keywords = ["cli", "random", "rng", "string"]
+keywords = ["cli", "random", "rng", "string", "dsl"]
 
 [dependencies]
 rand = "0.8.5"

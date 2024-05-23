@@ -52,6 +52,7 @@ pub struct Cli {
     )]
     pub regex: Option<String>,
 
+    /// Specify a group of strings (e.g. "foo" "bar" "baz" will generate "bar")
     #[arg(
         long,
         short,

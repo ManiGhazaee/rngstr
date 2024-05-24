@@ -419,16 +419,16 @@ bar.ron
         "dxpln": (
             x: 0.7885895,
         ),
-		"yaqdg": (
+        "yaqdg": (
             x: 0.48093498,
         ),
-		"hungukuf": (
+        "hungukuf": (
             x: 0.9161161,
         ),
-		"qtfnkeve": (
+        "qtfnkeve": (
             x: 0.9836798,
         ),
-		"dqedis": (
+        "dqedis": (
             x: 0.42920595,
         )
     },
@@ -438,22 +438,22 @@ bar.ron
             u: "a0",
             v: true,
         ),
-		(
+        (
             t: Rgba(209, 48, 76, 67),
             u: "a1",
             v: true,
         ),
-		(
+        (
             t: Rgba(62, 167, 240, 81),
             u: "a2",
             v: false,
         ),
-		(
+        (
             t: Rgba(251, 139, 57, 219),
             u: "a3",
             v: false,
         ),
-		(
+        (
             t: Rgba(146, 106, 246, 52),
             u: "a4",
             v: false,

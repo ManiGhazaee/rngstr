@@ -1,19 +1,19 @@
 use std::{fs, time::Instant};
 
 use clap::Parser;
-use rngstr::{commands, copy_print, par_rngstr, parse, tokenize, Cli};
+use rngstr::{procs, copy_print, par_rngstr, parse, tokenize, Config};
 
 fn main() {
-    let cli = Cli::parse();
-    if let Some(file) = &cli.dsl {
+    let config = Config::parse();
+    if let Some(file) = &config.dsl {
         let src = fs::read_to_string(&file[0]).expect("reading source file");
-        let commands = commands(&src, &cli.as_config());
+        let commands = procs(&src);
         let tokens = tokenize(src);
         let inst = Instant::now();
         let res = parse(&tokens, &Default::default(), &commands).unwrap();
         dbg!(inst.elapsed());
         if file.len() == 1 {
-            copy_print(&cli, res);
+            copy_print(&config, res);
         } else if file.len() == 2 {
             fs::write(&file[1], res).expect("writing file in destination");
         } else {
@@ -21,7 +21,7 @@ fn main() {
         }
         return;
     }
-    let res = par_rngstr(&cli);
+    let res = par_rngstr(&config);
 
-    copy_print(&cli, res);
+    copy_print(&config, res);
 }

@@ -1,23 +1,23 @@
 use super::*;
 
 lazy_static! {
-    pub static ref BUILTINS: Mutex<[(String, Command); 20]> = {
+    pub static ref BUILTINS: Mutex<[(String, Proc); 20]> = {
         let mut x = [
             (
                 "repeat".into(),
-                Command::Command {
+                Proc::Command {
                     params: Some(Params {
-                        raw: "--repeat count -s suffix".into(),
+                        body: "--repeat count -s suffix".into(),
                         params: vec!["count".into(), "suffix".into()],
                     }),
-                    cli: Default::default(),
+                    config: Default::default(),
                 },
             ),
             (
                 "cmd".into(),
-                Command::Builtin {
+                Proc::Builtin {
                     params: Some(Params {
-                        raw: "".into(),
+                        body: "".into(),
                         params: vec!["string".into()],
                     }),
                     f: builtins::cmd,
@@ -25,9 +25,9 @@ lazy_static! {
             ),
             (
                 "id".into(),
-                Command::Builtin {
+                Proc::Builtin {
                     params: Some(Params {
-                        raw: "".into(),
+                        body: "".into(),
                         params: vec!["tag".into()],
                     }),
                     f: builtins::id,
@@ -35,9 +35,9 @@ lazy_static! {
             ),
             (
                 "group".into(),
-                Command::Builtin {
+                Proc::Builtin {
                     params: Some(Params {
-                        raw: "".into(),
+                        body: "".into(),
                         params: vec!["items".into()],
                     }),
                     f: builtins::group,
@@ -45,9 +45,9 @@ lazy_static! {
             ),
             (
                 "array".into(),
-                Command::Macro {
+                Proc::Macro {
                     params: Some(Params {
-                        raw: "[!repeat<length, \", \">(!command())]".into(),
+                        body: "[!repeat<length, \", \">(!command())]".into(),
                         params: vec!["command".into(), "length".into()],
                     }),
                     tokens: vec![],
@@ -55,9 +55,9 @@ lazy_static! {
             ),
             (
                 "array_fill".into(),
-                Command::Macro {
+                Proc::Macro {
                     params: Some(Params {
-                        raw: "[!repeat<length, \", \">(element)]".into(),
+                        body: "[!repeat<length, \", \">(element)]".into(),
                         params: vec!["element".into(), "length".into()],
                     }),
                     tokens: vec![],
@@ -73,7 +73,7 @@ lazy_static! {
 
 pub fn cmd(args: &Vec<String>) -> Result<String, String> {
     let string = inside_quote(&args[0]);
-    let cli = Cli::from_raw_args(&string);
+    let cli = Config::from_body(&string);
     Ok(par_rngstr(&cli))
 }
 
@@ -91,7 +91,7 @@ pub fn id(args: &Vec<String>) -> Result<String, String> {
 }
 
 pub fn group(args: &Vec<String>) -> Result<String, String> {
-    let cli = Cli::from_raw_args(&format!("--group {}", &args.join(" ")));
+    let cli = Config::from_body(&format!("--group {}", &args.join(" ")));
     Ok(par_rngstr(&cli))
 }
 

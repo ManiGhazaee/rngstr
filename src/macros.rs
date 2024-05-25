@@ -41,9 +41,9 @@ macro_rules! builtin_types {
         [$(
             (
                 stringify!($t).to_string(),
-                Command::Builtin {
+                Proc::Builtin {
                     params: Some(Params {
-                        raw: "".into(),
+                        body: "".into(),
                         params: vec!["start".into(), "end".into()],
                     }),
                     f: builtins::$t,

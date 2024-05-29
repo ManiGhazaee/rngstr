@@ -14,8 +14,9 @@ use rand::{rngs::ThreadRng, thread_rng, Rng};
 use rayon::prelude::*;
 use regex::bytes::Regex;
 
-mod builtins;
+#[macro_use]
 mod macros;
+mod builtins;
 
 lazy_static! {
     static ref SET_CACHE: Mutex<HashMap<String, &'static str>> = Default::default();
@@ -206,7 +207,7 @@ fn first_text_byte(src: &str) -> usize {
 }
 
 pub fn procs(src: &str) -> Procs {
-    let mut commands = HashMap::from(std::mem::take(&mut *BUILTINS.lock().unwrap()));
+    let mut procs = HashMap::from(std::mem::take(&mut *BUILTINS.lock().unwrap()));
     for line in src.lines() {
         let line_string = line.to_string();
         let mut trimmed_line = line_string.trim_start();
@@ -245,7 +246,7 @@ pub fn procs(src: &str) -> Procs {
                                 }
                                 temp.push(ch);
                             }
-                            let command = if let Some(p) = params {
+                            let proc = if let Some(p) = params {
                                 Proc::Macro {
                                     tokens: Vec::new(),
                                     params: Some(Params {
@@ -260,25 +261,25 @@ pub fn procs(src: &str) -> Procs {
                                     tokens,
                                 }
                             };
-                            commands.insert(name, command);
+                            procs.insert(name, proc);
                         } else {
                             let body = &trimmed_line[i + 1..];
                             if let Some(params) = params {
-                                let command = Proc::Command {
+                                let proc = Proc::Command {
                                     params: Some(Params {
                                         body: body.to_string(),
                                         params,
                                     }),
                                     config: Config::default(),
                                 };
-                                commands.insert(name, command);
+                                procs.insert(name, proc);
                             } else {
                                 let config = Config::from_body(body);
-                                let command = Proc::Command {
+                                let proc = Proc::Command {
                                     params: None,
                                     config,
                                 };
-                                commands.insert(name, command);
+                                procs.insert(name, proc);
                             }
                         }
                         break;
@@ -292,7 +293,7 @@ pub fn procs(src: &str) -> Procs {
         }
     }
 
-    commands
+    procs
 }
 
 fn tokenize_text(src: &str) -> Vec<Token> {
@@ -524,7 +525,7 @@ fn parse_token(
             let proc = if let Some(args) = args {
                 match proc {
                     Proc::Builtin { f, .. } => {
-                        let args = command_args(args, procs)?;
+                        let args = parse_proc_args(args, procs)?;
                         return (f)(&args);
                     }
                     Proc::Macro {
@@ -577,7 +578,7 @@ fn parse_token(
     }
 }
 
-fn command_args(args: &Vec<Vec<Token>>, procs: &Procs) -> Result<Vec<String>, String> {
+fn parse_proc_args(args: &Vec<Vec<Token>>, procs: &Procs) -> Result<Vec<String>, String> {
     args.iter()
         .map(|i| parse(i, &Default::default(), procs))
         .collect::<Result<_, _>>()

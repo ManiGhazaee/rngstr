@@ -47,8 +47,8 @@ lazy_static! {
                 "array".into(),
                 Proc::Macro {
                     params: Some(Params {
-                        body: "[!repeat<length, \", \">(!command())]".into(),
-                        params: vec!["command".into(), "length".into()],
+                        body: "[!repeat<length, \", \">(!procedure())]".into(),
+                        params: vec!["procedure".into(), "length".into()],
                     }),
                     tokens: vec![],
                 },

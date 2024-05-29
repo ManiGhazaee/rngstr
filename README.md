@@ -9,10 +9,10 @@ A cli tool for generating random strings of characters with customization option
   - [Defaults](#defaults)
 - [Examples](#examples)
 - [DSL Usage](#dsl-usage)
-  - [Command/Macro Declaration](#commandmacro-declaration)
+  - [Procedure Declaration](#procedure-declaration)
     - [Command](#command)
     - [Macro](#macro)
-  - [Command/Macro Call](#commandmacro-call)
+  - [Procedure Call](#procedure-call)
     - [Built-ins](#built-ins)
 - [DSL Examples](#dsl-examples)
 
@@ -111,109 +111,123 @@ rngstr -c 0001 -l 8 -p "0b" -s " " -r 3
 
 ## DSL Usage
 
-### Command/Macro Declaration
+### Procedure Declaration
 
 #### Command
 
-basic:
+Basic:
 ```
 !<name>: [OPTIONS]
 ```
-e.g.
+
+Example:
+
 ```
 !foo: --regex [0-9] -l 8
 ```
 
-with parameters:
+With parameters:
+
 ```
 !<name><parameters...>: [OPTIONS]
 ```
-e.g.
+
+Example:
+
 ```
 !foo<start, end>: --range start..end
 ```
 
 #### Macro
 
-basic:
+Basic:
+
 ```
 !<name>:(<text>) 
 ```
-e.g.
+
+Example:
+
 ```
 !foo:(!bar())
 ```
 
-with parameters:
+With parameters:
+
 ```
 !<name><parameters...>:(<text>)
 ```
-e.g.
+
+Example:
+
 ```
 !foo<x, y, z>:(!bar<z>() !baz<x, y>()) 
 ```
 
-### Command/Macro Call
+### Procedure Call
 
-After the first non-declaration line (a trimmed line not starting with `!`), you can call the declared command/macros using the following syntax:
+After the first non-declaration line (a trimmed line not starting with `!`), you can call the declared procedure using the following syntax:
+
+Basic:
 
 ```
 !<name>()
 ```
-e.g.
+
+Example:
+
 ```
 !foo()
 ```
 
-or
+With placeholder `$`:
 
 ```
 !<name>($)
 ```
-e.g.
+
+Example:
+
 ```
 !foo($)
 ```
 
-or with arguments seperated by `,`:
+You can also use multiple placeholders within a call, where each `$` will generate the same string:
+
+Example:
 
 ```
-!<name><arguments...>()
-```
-e.g.
-```
-!foo<x, y, z>()
-```
-
-where `$` is a placeholder for the generated string.
-
-You can also use multiple placeholders within a call, where each `$` will generate the same string.
-
-```
-!<name>($ $)
-```
-e.g.
-```
-!foo: -c 012 -l 4 
+!foo: -c 012 -l 4
 -
 !foo($ $ $ $)
 ```
-output:
+
+Output:
 ```
 -
 2211 2211 2211 2211
 ```
 
-if we call the sub string after first `:` in command/macro declaration command/marco body then:
-
-because each occurrence of parameters inside command/macro body is being replaced by parsed arguments in command/macro call it is possible to pass the name of a command/macro as an argument and call it inside the command/macro body:
+With arguments seperated by `,`:
 
 ```
-!array<command, length>:([!repeat<length, ", ">(!command())])
+!<name><arguments...>()
 ```
-e.g.
+
+Example:
+
 ```
-!array<command, length>:([!repeat<length, ", ">(!command())])
+!foo<x, y, z>()
+```
+
+---
+
+If we call the substring after the first `:` in the procedure declaration procedure body, each occurrence of parameters inside the procedure body is replaced by parsed arguments in the procedure call. It is possible to pass the name of a procedure as an argument and call it inside the procedure body:
+
+Example:
+
+```
+!array<procedure, length>:([!repeat<length, ", ">(!procedure())])
 !foo: --regex [a-z0-9] -l 8
 !foo_str:("!foo()")
 
@@ -221,19 +235,25 @@ e.g.
     "array": !array<foo_str, 4>()
 }
 ```
-output:
+
+Output:
+
 ```
 {
     "array": ["2r4xtqv0", "t9na5pn0", "p1nbqvra", "c6hhww19"]
 }
 ```
-or:
+
+Or:
+
 ```
 {
     "array": !array<array<array<foo_str, 2>, 2>, 2>()
 }
 ```
-output:
+
+Output:
+
 ```
 {
     "array": [[["mw4kghh2", "qk2htxp2"], ["4s7g0z9n", "a1cszc89"]], [["xlcyhv4x", "ds4b351r"], ["pylnsvuu", "kny0h3a3"]]]
@@ -242,48 +262,93 @@ output:
 
 #### Built-ins
 
-These command/macros are usable by calling with their name and overwritable by declaraing another command/macro with their name.
+These procedures are usable by calling with their name and overwritable by declaraing another procedure with their name.
 
-`!cmd<string>`
-e.g.
+`cmd<string>`
+
+Executes a command and returns the result.
+
+Example:
+
 ```
 !cmd<"--group foo bar baz">()
 ```
-output:
+
+Output:
+
 ```
 foo
 ```
 
 ---
 
-`!repeat<count, suffix>`
-e.g.
+`repeat<count, suffix>`
+
+Repeats a procedure a specified number of times, with each result separated by a given suffix.
+
+Example:
+
 ```
 !repeat<4, ", ">(!cmd<"--range 0..100">())
 ```
-output: 
+
+Output: 
+
 ```
 23, 67, 4, 91
 ```
 
 ---
 
-`!array<command, length>`: macro `[!repeat<length, ", ">(!command())]`
+`array<procedure, length>`
+
+Creates an array by repeating a procedure a specified number of times.
+
+Example:
+
+```
+!array<usize<0, 100>, 5>()
+```
+
+Output:
+
+```
+[23, 67, 4, 91, 45]
+```
 
 ---
 
-`!array_fill<element, length>`: macro `[!repeat<length, ", ">(element)]`
+`array_fill<element, length>`
+
+Creates an array filled with a specified element repeated a specified number of times.
+
+Example:
+
+```
+!array_fill<42, 5>()
+```
+
+Output:
+
+```
+[42, 42, 42, 42, 42]
+```
+
 
 ---
 
-`!id<tag>`: adds an entry in a hashmap with tag as a key and 0 as value and increments it on each call (because of parallel parsing it doesn't generate the numbers in order)
-e.g.
+`!id<tag>`: Adds an entry in a hashmap with the tag as the key and 0 as the initial value, incrementing it on each call. Due to parallel parsing, the numbers are not generated in order.
+
+Example:
+
 ```
 !array<id<a>, 10>()
 !array<id<b>, 10>()
 !array<id<a>, 10>()
 ```
-output:
+
+Output:
+
 ```
 [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
@@ -292,13 +357,19 @@ output:
 
 ---
 
-`!group<items...>`: a builtin function that takes items seperated by `,` and randomly returns one of the items.
-e.g.
+`!group<items...>`
+
+Randomly returns one of the specified items
+
+Example:
+
 ```
 !group<foo, bar, baz>()
 !group<foo, bar, baz>()
 ```
-output:
+
+Output:
+
 ```
 foo
 baz
@@ -306,17 +377,23 @@ baz
 
 ---
 
-All rust number types:
+Number Types
+
+All Rust number types are supported for generating random values within a range or without a specified range:
+
+Example:
+
 ```
 [!u8<0, 10>(), !u16<0, 10>(), !u32<0, 10>(), !u64<0, 10>(), !u128<0, 10>(), !i8<0, 10>(), !i16<0, 10>(), !i32<0, 10>(), !i64<0, 10>(), !i128<0, 10>(), !f32<0, 10>(), !f64<0, 10>(), !usize<0, 10>(), !isize<0, 10>(), !id<0>()]
 [!u8(), !u16(), !u32(), !u64(), !u128(), !i8(), !i16(), !i32(), !i64(), !i128(), !f32(), !f64(), !usize(), !isize()]
 ```
+
+Ouput:
+
 ```
 [3, 7, 4, 8, 9, 4, 7, 3, 1, 4, 6.409465, 1.9037502953455854, 3, 5, 0]
 [169, 8026, 3981710656, 15859526283082379939, 294250989955636718152642071911969640664, 114, -11975, 862154430, -650703279019604957, 104795060125221781861534722358106096176, 0.46059388, 0.8589771759897691, 13709073818113593800, 5359762487833681572]
 ```
-
-
 
 ## DSL Examples
 
@@ -372,7 +449,7 @@ bar.json
 foo.txt
 ```
 !foo_group:(foo, bar, baz)
-!dq<command>:("!command()")
+!dq<proc>:("!proc()")
 
 {
     "group": !array<dq<group<!foo_group()>>, 5>()

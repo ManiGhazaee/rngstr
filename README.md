@@ -264,7 +264,7 @@ Output:
 
 These procedures are usable by calling with their name and overwritable by declaraing another procedure with their name.
 
-`cmd<string>`
+**`cmd<string>`**
 
 Executes a command and returns the result.
 
@@ -282,7 +282,7 @@ foo
 
 ---
 
-`repeat<count, suffix>`
+**`repeat<count, suffix>`**
 
 Repeats a procedure a specified number of times, with each result separated by a given suffix.
 
@@ -300,7 +300,7 @@ Output:
 
 ---
 
-`array<procedure, length>`
+**`array<procedure, length>`**
 
 Creates an array by repeating a procedure a specified number of times.
 
@@ -318,7 +318,7 @@ Output:
 
 ---
 
-`array_fill<element, length>`
+**`array_fill<element, length>`**
 
 Creates an array filled with a specified element repeated a specified number of times.
 
@@ -337,7 +337,9 @@ Output:
 
 ---
 
-`!id<tag>`: Adds an entry in a hashmap with the tag as the key and 0 as the initial value, incrementing it on each call. Due to parallel parsing, the numbers are not generated in order.
+**`!id<tag>`**
+
+Adds an entry in a hashmap with the tag as the key and 0 as the initial value, incrementing it on each call. Due to parallel parsing, the numbers are not generated in order.
 
 Example:
 
@@ -357,7 +359,7 @@ Output:
 
 ---
 
-`!group<items...>`
+**`!group<items...>`**
 
 Randomly returns one of the specified items
 
@@ -377,7 +379,7 @@ baz
 
 ---
 
-Number Types
+**Number Types**
 
 All Rust number types are supported for generating random values within a range or without a specified range:
 
